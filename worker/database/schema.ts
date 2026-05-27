@@ -6,6 +6,61 @@ const REASONING_EFFORT_VALUES = ['low', 'medium', 'high'] as const;
 const PROVIDER_OVERRIDE_VALUES = ['cloudflare', 'direct'] as const;
 
 // ========================================
+// TIER AND ACCESS CONTROL
+// ========================================
+
+/**
+ * Tiers table - Defines usage plans with limits and feature flags
+ */
+export const tiers = sqliteTable('tiers', {
+    id: text('id').primaryKey(),
+    name: text('name').notNull().unique(),
+    description: text('description'),
+
+    // Usage limits
+    maxApps: integer('max_apps').notNull().default(3),
+    dailyAppCreations: integer('daily_app_creations').notNull().default(2),
+    dailyLlmCredits: integer('daily_llm_credits').notNull().default(100),
+    maxCustomProviders: integer('max_custom_providers').notNull().default(0),
+
+    // Feature flags (JSON)
+    features: text('features', { mode: 'json' }).notNull().default('{}'),
+
+    // Display
+    sortOrder: integer('sort_order').notNull().default(0),
+    isDefault: integer('is_default', { mode: 'boolean' }).default(false),
+
+    // Metadata
+    createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`CURRENT_TIMESTAMP`),
+});
+
+/**
+ * Tier overrides table - Per-user limit overrides set by admins
+ * Nullable fields: null means "use tier default"
+ */
+export const tierOverrides = sqliteTable('tier_overrides', {
+    userId: text('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+
+    // Override limits (null = use tier default)
+    maxApps: integer('max_apps'),
+    dailyAppCreations: integer('daily_app_creations'),
+    dailyLlmCredits: integer('daily_llm_credits'),
+    maxCustomProviders: integer('max_custom_providers'),
+    features: text('features', { mode: 'json' }),
+
+    // Audit
+    reason: text('reason'),
+    setBy: text('set_by').references(() => users.id, { onDelete: 'set null' }),
+
+    // Metadata
+    createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+    setByIdx: index('tier_overrides_set_by_idx').on(table.setBy),
+}));
+
+// ========================================
 // CORE USER AND IDENTITY MANAGEMENT
 // ========================================
 
@@ -37,6 +92,10 @@ export const users = sqliteTable('users', {
     theme: text('theme', { enum: ['light', 'dark', 'system'] }).default('system'),
     timezone: text('timezone').default('UTC'),
     
+    // Tier and Role
+    tierId: text('tier_id').default('free').references(() => tiers.id),
+    role: text('role', { enum: ['user', 'admin'] }).default('user'),
+
     // Account Status
     isActive: integer('is_active', { mode: 'boolean' }).default(true),
     isSuspended: integer('is_suspended', { mode: 'boolean' }).default(false),
@@ -56,6 +115,8 @@ export const users = sqliteTable('users', {
     lockedUntilIdx: index('users_locked_until_idx').on(table.lockedUntil),
     isActiveIdx: index('users_is_active_idx').on(table.isActive),
     lastActiveAtIdx: index('users_last_active_at_idx').on(table.lastActiveAt),
+    tierIdIdx: index('users_tier_id_idx').on(table.tierId),
+    roleIdx: index('users_role_idx').on(table.role),
 }));
 
 /**
@@ -157,6 +218,7 @@ export const apps = sqliteTable('apps', {
     
     // Deployment Information
     deploymentId: text('deployment_id'), // Deployment ID (extracted from deployment URL)
+    slug: text('slug').unique(), // Custom deployment slug for user-friendly URLs
     
     // GitHub Repository Integration
     githubRepositoryUrl: text('github_repository_url'), // GitHub repository URL
@@ -629,3 +691,9 @@ export type NewUserModelProvider = typeof userModelProviders.$inferInsert;
 
 export type Star = typeof stars.$inferSelect;
 export type NewStar = typeof stars.$inferInsert;
+
+export type Tier = typeof tiers.$inferSelect;
+export type NewTier = typeof tiers.$inferInsert;
+
+export type TierOverride = typeof tierOverrides.$inferSelect;
+export type NewTierOverride = typeof tierOverrides.$inferInsert;

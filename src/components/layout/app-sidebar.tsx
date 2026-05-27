@@ -11,6 +11,7 @@ import {
 	Bookmark,
 	// LayoutGrid,
 	Compass,
+	Shield,
 } from 'lucide-react';
 import './sidebar-overrides.css';
 import { useRecentApps, useFavoriteApps, useApps } from '@/hooks/use-apps';
@@ -599,6 +600,22 @@ export function AppSidebar() {
 									)}
 								</SidebarMenuButton>
 							</SidebarMenuItem>
+							{user?.role === 'admin' && (
+								<SidebarMenuItem>
+									<SidebarMenuButton
+										onClick={() => navigate('/admin')}
+										tooltip="Admin"
+										className="group hover:opacity-80 hover:cursor-pointer hover:bg-bg-1/50 transition-all duration-200"
+									>
+										<Shield className="h-6 w-6 text-text-primary/60 group-hover:text-primary/80 transition-colors" />
+										{!isCollapsed && (
+											<span className="font-medium text-text-primary/80 group-hover:text-primary transition-colors">
+												Admin
+											</span>
+										)}
+									</SidebarMenuButton>
+								</SidebarMenuItem>
+							)}
 						</SidebarMenu>
 					)}
 				</SidebarFooter>

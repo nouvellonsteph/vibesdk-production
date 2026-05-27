@@ -308,3 +308,25 @@ export type {
     GitHubExportOptions,
     GitHubExportResult,
 } from 'worker/services/github/types';
+
+// Admin types
+export type {
+    TiersListData,
+    TierData,
+    TierDeleteData,
+    AdminUsersListData,
+    AdminUserDetailData,
+    AdminUserTierUpdateData,
+    AdminUserRoleUpdateData,
+    AdminUserOverridesData,
+    AdminUserSuspendData,
+    AdminStatsData,
+    AdminUserData,
+    CreateTierRequest,
+    UpdateTierRequest,
+    SetUserOverridesRequest,
+} from 'worker/api/controllers/admin/types';
+
+// Tier types
+export type { Tier, TierOverride } from 'worker/database/schema';
+export type { TierFeatures, EffectiveLimits } from 'worker/database/services/TierService';

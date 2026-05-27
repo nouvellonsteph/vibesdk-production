@@ -206,6 +206,13 @@ export class AppController extends BaseController {
                 return AppController.createErrorResponse<UpdateAppVisibilityData>('Visibility must be either "private" or "public"', 400);
             }
 
+            // Tier gate: check if user can make apps public
+            if (visibility === 'public') {
+                const { checkTierFeature } = await import('../../../utils/tierGating');
+                const blocked = await checkTierFeature(env, user.id, 'canMakePublic', 'making apps public');
+                if (blocked) return blocked as ControllerResponse<ApiResponse<UpdateAppVisibilityData>>;
+            }
+
             const validVisibility = visibility as Visibility;
             
             const appService = new AppService(env);

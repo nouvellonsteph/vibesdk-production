@@ -275,6 +275,8 @@ export function mapUserResponse(
 		provider: user.provider || undefined,
 		emailVerified: user.emailVerified || undefined,
 		createdAt: user.createdAt || undefined,
+		role: ('role' in user && (user.role === 'admin' || user.role === 'user')) ? user.role : 'user',
+		tierId: ('tierId' in user && typeof user.tierId === 'string') ? user.tierId : 'free',
 	};
 }
 

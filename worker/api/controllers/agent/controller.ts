@@ -26,6 +26,7 @@ import { hasTicketParam } from '../../../middleware/auth/ticketAuth';
 import { checkUsageAndBalance, getUserGateway } from '../../../services/rate-limit/usageChecker';
 import { readTokenCookie } from '../../../utils/oauthCookie';
 import { UsageLimitExceededError } from 'shared/types/errors';
+import { TierService } from '../../../database/services/TierService';
 
 const defaultCodeGenArgs: Partial<CodeGenArgs> = {
     language: 'typescript',
@@ -95,6 +96,27 @@ export class CodingAgentController extends BaseController {
             const writer = writable.getWriter();
             // Check if user is authenticated (required for app creation)
             const user = context.user!;
+
+            // Check tier-based total app limit
+            const tierService = new TierService(env);
+            const appCheck = await tierService.canUserCreateApp(user.id);
+            if (!appCheck.allowed) {
+                return CodingAgentController.createErrorResponse(
+                    new UsageLimitExceededError(
+                        `You have reached the maximum of ${appCheck.max} apps for your ${appCheck.tierName} tier (currently ${appCheck.current}). Archive or delete apps to create new ones.`,
+                        [{
+                            type: 'apps',
+                            window: 'total',
+                            current: appCheck.current,
+                            max: appCheck.max,
+                            percentUsed: appCheck.max > 0 ? (appCheck.current / appCheck.max) * 100 : 100,
+                        }],
+                        false
+                    ),
+                    429
+                );
+            }
+
             try {
                 await RateLimitService.enforceAppCreationRateLimit(env, context.config.security.rateLimit, user, request);
             } catch (error) {
@@ -440,6 +462,136 @@ export class CodingAgentController extends BaseController {
             this.logger.error('Error deploying preview', error);
             const appError = CodingAgentController.handleError(error, 'deploy preview') as ControllerResponse<ApiResponse<AgentPreviewResponse>>;
             return appError;
+        }
+    }
+
+    /**
+     * Deploy to Cloudflare Workers for Platforms via HTTP POST.
+     * Bypasses WebSocket message delivery which can be unreliable.
+     */
+    static async deployToCloudflare(
+        _request: Request,
+        env: Env,
+        _: ExecutionContext,
+        context: RouteContext
+    ): Promise<Response> {
+        try {
+            const agentId = context.pathParams.agentId;
+            if (!agentId) {
+                return CodingAgentController.createErrorResponse('Missing agent ID parameter', 400);
+            }
+
+            const user = context.user;
+            if (!user) {
+                return CodingAgentController.createErrorResponse('Authentication required', 401);
+            }
+
+            // Tier gate: check if user can deploy
+            const { checkTierFeature } = await import('../../../utils/tierGating');
+            const blocked = await checkTierFeature(env, user.id, 'canDeploy', 'deploying to Cloudflare');
+            if (blocked) return blocked;
+
+            this.logger.info('Deploying to Cloudflare via HTTP', { agentId, userId: user.id });
+
+            const agentInstance = await getAgentStub(env, agentId);
+            const isReady = await agentInstance.isInitialized();
+            if (!isReady) {
+                return CodingAgentController.createErrorResponse('Agent not found or not initialized', 404);
+            }
+
+            const result: { success: boolean; url?: string; deploymentId?: string; error?: string } = await agentInstance.deployProject();
+
+            this.logger.info('Cloudflare deployment result', { agentId, success: result.success, url: result.url });
+
+            return CodingAgentController.createSuccessResponse(result);
+        } catch (error) {
+            this.logger.error('Error deploying to Cloudflare', error);
+            return CodingAgentController.handleError(error, 'deploy to Cloudflare');
+        }
+    }
+
+    /**
+     * Set or update the deployment slug for an app.
+     * Validates uniqueness and format.
+     */
+    static async setSlug(
+        request: Request,
+        env: Env,
+        _: ExecutionContext,
+        context: RouteContext
+    ): Promise<Response> {
+        try {
+            const agentId = context.pathParams.agentId;
+            if (!agentId) {
+                return CodingAgentController.createErrorResponse('Missing agent ID parameter', 400);
+            }
+
+            const body = await request.json() as { slug: string };
+            const slug = body.slug?.trim().toLowerCase();
+
+            if (!slug) {
+                return CodingAgentController.createErrorResponse('Slug is required', 400);
+            }
+
+            // Validate slug format: lowercase alphanumeric + hyphens, 3-63 chars
+            if (!/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(slug)) {
+                return CodingAgentController.createErrorResponse(
+                    'Slug must be 3-63 characters, lowercase letters, numbers, and hyphens only. Must start and end with a letter or number.',
+                    400
+                );
+            }
+
+            // Reserved slugs
+            const reserved = ['www', 'api', 'admin', 'app', 'mail', 'ftp', 'vibesdk', 'preview', 'build'];
+            if (reserved.includes(slug)) {
+                return CodingAgentController.createErrorResponse(`The slug "${slug}" is reserved`, 400);
+            }
+
+            const appService = new AppService(env);
+
+            // Check uniqueness
+            const existing = await appService.getAppBySlug(slug);
+            if (existing && existing.id !== agentId) {
+                return CodingAgentController.createErrorResponse(`The slug "${slug}" is already taken`, 409);
+            }
+
+            // Update the slug
+            const updated = await appService.updateAppSlug(agentId, slug);
+            if (!updated) {
+                return CodingAgentController.createErrorResponse('Failed to update slug', 500);
+            }
+
+            return CodingAgentController.createSuccessResponse({ slug });
+        } catch (error) {
+            this.logger.error('Error setting slug', error);
+            return CodingAgentController.handleError(error, 'set slug');
+        }
+    }
+
+    /**
+     * Check if a slug is available.
+     */
+    static async checkSlug(
+        _request: Request,
+        env: Env,
+        _: ExecutionContext,
+        context: RouteContext
+    ): Promise<Response> {
+        try {
+            const slug = context.queryParams.get('slug')?.trim().toLowerCase();
+            if (!slug) {
+                return CodingAgentController.createErrorResponse('Slug query parameter is required', 400);
+            }
+
+            const appService = new AppService(env);
+            const existing = await appService.getAppBySlug(slug);
+
+            return CodingAgentController.createSuccessResponse({
+                slug,
+                available: !existing,
+            });
+        } catch (error) {
+            return CodingAgentController.handleError(error, 'check slug');
         }
     }
 }

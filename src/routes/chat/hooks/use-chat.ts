@@ -688,57 +688,39 @@ export function useChat({
 		sendWebSocketMessage(websocket, 'resume_generation');
 	}, [websocket]);
 
-	const handleDeployToCloudflare = useCallback(async (instanceId: string) => {
+	const handleDeployToCloudflare = useCallback(async (_instanceId: string) => {
+		if (!chatId) {
+			logger.error('No chat ID available for deployment');
+			return;
+		}
+
 		try {
-			// Send deployment command via WebSocket instead of HTTP request
-			if (sendWebSocketMessage(websocket, 'deploy', { instanceId })) {
-				logger.debug('🚀 Deployment WebSocket message sent:', instanceId);
+			setIsDeploying(true);
+			setDeploymentError('');
+			logger.debug('Deploying to Cloudflare via HTTP POST', { agentId: chatId });
 
-				// Clear any existing deployment timeout
-				if (deploymentTimeoutRef.current) {
-					clearTimeout(deploymentTimeoutRef.current);
-					deploymentTimeoutRef.current = null;
-				}
-				
-				// Set 1-minute timeout for deployment
-				deploymentTimeoutRef.current = setTimeout(() => {
-					if (isDeploying) {
-						logger.warn('Deployment timeout after 1 minute');
+			const response = await apiClient.deployToCloudflare(chatId);
 
-						// Reset deployment state
-						setIsDeploying(false);
-						setCloudflareDeploymentUrl('');
-						setIsRedeployReady(false);
-
-						// Show timeout message
-						sendMessage(createAIMessage('deployment_timeout', `Deployment timed out after 1 minute.\n\nPlease try deploying again. The server may be busy.`));
-
-						// Debug logging for timeout
-						onDebugMessage?.('warning',
-							'Deployment Timeout',
-							`Deployment for ${instanceId} timed out after 60 seconds`,
-							'Deployment Timeout Management'
-						);
-					}
-					deploymentTimeoutRef.current = null;
-				}, 60000); // 1 minute = 60,000ms
-
+			if (response.data?.success && response.data?.url) {
+				setCloudflareDeploymentUrl(response.data.url);
+				setIsRedeployReady(true);
+				sendMessage(createAIMessage('deployment_success', `Deployed successfully!\n\n${response.data.url}`));
+				logger.info('Deployment completed', { url: response.data.url });
 			} else {
-				throw new Error('WebSocket connection not available');
+				const errorMsg = response.data?.error || response.error?.message || 'Deployment failed';
+				setDeploymentError(errorMsg);
+				sendMessage(createAIMessage('deployment_error', `Deployment failed: ${errorMsg}\n\nYou can try again.`));
+				logger.error('Deployment failed', { error: errorMsg });
 			}
 		} catch (error) {
-			logger.error('Error sending deployment WebSocket message:', error);
-
-			// Set deployment state immediately for UI feedback
-			setIsDeploying(true);
-			// Clear any previous deployment error
-			setDeploymentError('');
-			setCloudflareDeploymentUrl('');
-			setIsRedeployReady(false);
-
-			sendMessage(createAIMessage('deployment_error', `Failed to initiate deployment: ${error instanceof Error ? error.message : 'Unknown error'}\n\nYou can try again.`));
+			const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+			logger.error('Error deploying to Cloudflare:', error);
+			setDeploymentError(errorMsg);
+			sendMessage(createAIMessage('deployment_error', `Deployment failed: ${errorMsg}\n\nYou can try again.`));
+		} finally {
+			setIsDeploying(false);
 		}
-	}, [websocket, sendMessage, isDeploying, onDebugMessage]);
+	}, [chatId, sendMessage]);
 
 	const allFiles = useMemo(() => mergeFiles(bootstrapFiles, files), [bootstrapFiles, files]);
 
@@ -765,6 +747,7 @@ export function useChat({
 		// Deployment and generation control
 		isDeploying,
 		cloudflareDeploymentUrl,
+		setCloudflareDeploymentUrl,
 		deploymentError,
 		isRedeployReady,
 		isGenerationPaused,

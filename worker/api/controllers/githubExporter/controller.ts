@@ -358,6 +358,11 @@ export class GitHubExporterController extends BaseController {
                 );
             }
 
+            // Tier gate: check if user can export to GitHub
+            const { checkTierFeature } = await import('../../../utils/tierGating');
+            const blocked = await checkTierFeature(env, context.user.id, 'canExportGithub', 'GitHub export');
+            if (blocked) return blocked;
+
             const body = await request.json() as {
                 repositoryName: string;
                 description?: string;

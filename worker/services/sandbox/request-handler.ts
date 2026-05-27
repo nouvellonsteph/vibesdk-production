@@ -31,8 +31,10 @@ export async function proxyToSandbox<E extends SandboxEnv>(
     const routeInfo = extractSandboxRoute(url);
 
     if (!routeInfo) {
+      logger.info('[Proxy] No route info extracted from URL', { hostname: url.hostname });
       return null; // Not a request to an exposed container port
     }
+    logger.info('[Proxy] Route info extracted', { port: routeInfo.port, sandboxId: routeInfo.sandboxId, token: routeInfo.token, path: routeInfo.path });
 
     const { sandboxId, port, path, token } = routeInfo;
     const sandbox = getSandbox(env.Sandbox, sandboxId);
@@ -86,9 +88,10 @@ export async function proxyToSandbox<E extends SandboxEnv>(
   } catch (error) {
     logger.error(
       'Proxy routing error',
-      error instanceof Error ? error : new Error(String(error))
+      error instanceof Error ? error : new Error(String(error)),
+      { message: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined }
     );
-    return new Response('Proxy routing error', { status: 500 });
+    return new Response('Proxy routing error', { status: 502 });
   }
 }
 

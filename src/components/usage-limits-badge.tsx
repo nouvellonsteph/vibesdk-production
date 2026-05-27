@@ -95,7 +95,8 @@ export function UsageLimitsBadge({ onConnect }: UsageLimitsBadgeProps) {
 				}
 			};
 
-			usageText = `${formatValue(remaining)} free ${getUnit()} left`.trim();
+			const tierLabel = data.tier?.name || 'Free';
+			usageText = `${formatValue(remaining)} ${tierLabel.toLowerCase()} ${getUnit()} left`.trim();
 			mobileUsageText = `${formatValue(remaining)} ${getUnit()}`.trim();
 			showUsage = true;
 		}

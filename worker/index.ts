@@ -10,6 +10,7 @@ import { isOriginAllowed } from './config/security';
 import { proxyToSandbox } from './services/sandbox/request-handler';
 import { handleGitProtocolRequest, isGitProtocolRequest } from './api/handlers/git-protocol';
 import { getAgentStub } from './agents';
+import { authMiddleware } from './middleware/auth/auth';
 
 // Durable Object and Service exports
 export { UserAppSandboxService } from './services/sandbox/sandboxSdkClient';
@@ -45,7 +46,7 @@ function setOriginControl(env: Env, request: Request, currentHeaders: Headers): 
 async function handleUserAppRequest(request: Request, env: Env): Promise<Response> {
 	const url = new URL(request.url);
 	const { hostname } = url;
-	logger.info(`Handling user app request for: ${hostname}`);
+	logger.info(`Handling user app request for: ${hostname}`, { url: url.href, method: request.method });
 
 	// Check if this is an agent browser file serving request
 	// Pattern: b-{agentid}-{token}.{previewDomain}
@@ -88,6 +89,9 @@ async function handleUserAppRequest(request: Request, env: Env): Promise<Respons
         } else {
             headers.set('X-Preview-Type', 'sandbox');
         }
+        // Remove iframe-blocking headers so the preview loads in the main app's iframe
+        headers.delete('X-Frame-Options');
+        headers.delete('Content-Security-Policy');
         headers = setOriginControl(env, request, headers);
         headers.append('Vary', 'Origin');
 		headers.set('Access-Control-Expose-Headers', 'X-Preview-Type');
@@ -183,6 +187,73 @@ const worker = {
 				logger.info(`Handling Cloudflare OAuth request for: ${pathname}`);
 				const app = createApp(env);
 				return app.fetch(request, env, ctx);
+			}
+			
+			// Preview proxy: serves sandbox content through the main domain to bypass Cloudflare Access.
+			// The iframe loads /api/sandbox-preview/{port-sessionId-token}/* instead of the subdomain directly.
+			if (pathname.startsWith('/api/sandbox-preview/')) {
+				// Require authentication before proxying to prevent open-proxy abuse
+				const userSession = await authMiddleware(request, env);
+				if (!userSession) {
+					return new Response('Authentication required', { status: 401 });
+				}
+
+				const proxyPath = pathname.replace('/api/sandbox-preview/', '');
+				const slashIdx = proxyPath.indexOf('/');
+				const subdomain = slashIdx === -1 ? proxyPath : proxyPath.substring(0, slashIdx);
+				const resourcePath = slashIdx === -1 ? '/' : proxyPath.substring(slashIdx);
+
+				if (!subdomain) {
+					return new Response('Missing preview subdomain', { status: 400 });
+				}
+
+				// Build a fake request with the subdomain hostname so proxyToSandbox can parse it
+				const previewDomain = getPreviewDomain(env);
+				const fakeUrl = new URL(request.url);
+				fakeUrl.hostname = `${subdomain}.${previewDomain}`;
+				fakeUrl.pathname = resourcePath;
+				const fakeRequest = new Request(fakeUrl.toString(), {
+					method: request.method,
+					headers: request.headers,
+					body: request.body,
+					// @ts-expect-error - duplex needed for body streaming
+					duplex: 'half',
+				});
+
+				const sandboxResponse = await proxyToSandbox(fakeRequest, env);
+				if (sandboxResponse) {
+					const headers = new Headers(sandboxResponse.headers);
+					headers.delete('X-Frame-Options');
+					headers.delete('Content-Security-Policy');
+
+					// For HTML responses, inject a <base> tag so all asset paths
+					// resolve through the proxy (bypassing Cloudflare Access).
+					const contentType = headers.get('Content-Type') || '';
+					if (contentType.includes('text/html')) {
+						const basePath = `/api/sandbox-preview/${subdomain}/`;
+						let html = await sandboxResponse.text();
+						if (html.includes('<head>')) {
+							html = html.replace('<head>', `<head><base href="${basePath}">`);
+						} else if (html.includes('<head ')) {
+							html = html.replace(/<head([^>]*)>/, `<head$1><base href="${basePath}">`);
+						} else {
+							html = `<base href="${basePath}">` + html;
+						}
+						headers.set('Content-Length', new TextEncoder().encode(html).length.toString());
+						return new Response(html, {
+							status: sandboxResponse.status,
+							statusText: sandboxResponse.statusText,
+							headers,
+						});
+					}
+
+					return new Response(sandboxResponse.body, {
+						status: sandboxResponse.status,
+						statusText: sandboxResponse.statusText,
+						headers,
+					});
+				}
+				return new Response('Preview not available', { status: 502 });
 			}
 			
 			// Serve static assets for all other non-API routes from the ASSETS binding.

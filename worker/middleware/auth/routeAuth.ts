@@ -15,20 +15,21 @@ import { RateLimitExceededError } from 'shared/types/errors';
 import * as Sentry from '@sentry/cloudflare';
 import { getUserConfigurableSettings } from 'worker/config';
 import { authenticateViaTicket, hasTicketParam } from './ticketAuth';
+import { checkAndPromoteAdmin } from './adminPromotion';
 
 const logger = createLogger('RouteAuth');
 
 /**
  * Authentication levels for route protection
  */
-export type AuthLevel = 'public' | 'authenticated' | 'owner-only';
+export type AuthLevel = 'public' | 'authenticated' | 'owner-only' | 'admin';
 
 /**
  * Authentication requirement configuration
  */
 export interface AuthRequirement {
     required: boolean;
-    level: 'public' | 'authenticated' | 'owner-only';
+    level: 'public' | 'authenticated' | 'owner-only' | 'admin';
     resourceOwnershipCheck?: (user: AuthUser, params: Record<string, string>, env: Env) => Promise<boolean>;
 }
 
@@ -75,6 +76,12 @@ export const AuthConfig = {
         resourceOwnershipCheck: checkAppOwnership
     },
     
+    // Require admin role
+    admin: {
+        required: true,
+        level: 'admin' as const
+    },
+
     // Public read access, but owner required for modifications
     publicReadOwnerWrite: { 
         required: false 
@@ -106,6 +113,23 @@ export async function routeAuthChecks(
                 };
             }
 
+            return { success: true };
+        }
+
+        // For admin-only routes
+        if (requirement.level === 'admin') {
+            if (!user) {
+                return {
+                    success: false,
+                    response: createAuthRequiredResponse()
+                };
+            }
+            if (user.role !== 'admin') {
+                return {
+                    success: false,
+                    response: createForbiddenResponse('Admin access required')
+                };
+            }
             return { success: true };
         }
 
@@ -168,7 +192,7 @@ export async function enforceAuthRequirement(c: Context<AppEnv>) : Promise<Respo
     }
     
     // Only perform auth if we need it or don't have user yet
-    if (!user && (requirement.level === 'authenticated' || requirement.level === 'owner-only')) {
+    if (!user && (requirement.level === 'authenticated' || requirement.level === 'owner-only' || requirement.level === 'admin')) {
         const request = c.req.raw;
         const env = c.env;
         const params = c.req.param();
@@ -200,6 +224,10 @@ export async function enforceAuthRequirement(c: Context<AppEnv>) : Promise<Respo
                 return errorResponse('Authentication required', 401);
             }
             user = userSession.user;
+
+            // Auto-promote admin if email matches ADMIN_EMAILS env var
+            user = await checkAndPromoteAdmin(c.env, user);
+
             c.set('user', user);
             c.set('sessionId', userSession.sessionId);
             Sentry.setUser({ id: user.id, email: user.email });

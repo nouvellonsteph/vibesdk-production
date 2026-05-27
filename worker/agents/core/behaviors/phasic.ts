@@ -311,6 +311,7 @@ export class PhasicCodingBehavior extends BaseCodingBehavior<PhasicState> implem
             this.logger.info("State machine completed successfully");
         } catch (error) {
             this.logger.error("Error in state machine:", error);
+            this.broadcastError("Error in code generation", error);
         }
     }
 
@@ -421,6 +422,7 @@ export class PhasicCodingBehavior extends BaseCodingBehavior<PhasicState> implem
             if (error instanceof RateLimitExceededError) {
                 throw error;
             }
+            this.broadcastError("Error implementing phase", error);
             return {currentDevState: CurrentDevState.IDLE};
         }
     }

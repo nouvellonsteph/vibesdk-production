@@ -160,7 +160,7 @@ export abstract class BaseCodingBehavior<TState extends BaseProjectState>
                 this.logger.info("Initial commands executed successfully");
         } catch (error) {
             this.logger.error("Error during async initialization:", error);
-            // throw error;
+            throw error;
         }
     }
     onStateUpdate(_state: TState, _source: "server" | Connection) {}
@@ -435,6 +435,12 @@ export abstract class BaseCodingBehavior<TState extends BaseProjectState>
      * Executes phases sequentially with review cycles and proper state transitions
      */
     async generateAllFiles(): Promise<void> {
+        this.logger.info("generateAllFiles called", {
+            mvpGenerated: this.state.mvpGenerated,
+            pendingUserInputs: this.state.pendingUserInputs?.length ?? 0,
+            isCodeGenerating: this.isCodeGenerating(),
+            hasBlueprint: !!this.state.blueprint,
+        });
         if (this.state.mvpGenerated && this.state.pendingUserInputs.length === 0) {
             this.logger.info("Code generation already completed and no user inputs pending");
             return;

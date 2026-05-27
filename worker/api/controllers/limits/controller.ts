@@ -7,6 +7,7 @@ import { BaseController } from '../baseController';
 import { RouteContext } from '../../types/route-context';
 import { checkUsageAndBalance, isCloudflareGatewayLimitsEnabled } from '../../../services/rate-limit';
 import { CloudflareAccountService } from '../../../services/cloudflare/CloudflareAccountService';
+import { TierService } from '../../../database/services/TierService';
 import { createLogger } from '../../../logger';
 
 export class LimitsController extends BaseController {
@@ -30,9 +31,11 @@ export class LimitsController extends BaseController {
 		try {
 			// Token is read from the HttpOnly cookie inside checkUsageAndBalance.
 			const accountService = new CloudflareAccountService(env);
-			const [usageResult, selectedGateway] = await Promise.all([
+			const tierService = new TierService(env);
+			const [usageResult, selectedGateway, effectiveLimits] = await Promise.all([
 				checkUsageAndBalance(env, user.id, request),
 				accountService.getSelectedGatewayWithAccount(user.id),
+				tierService.getUserEffectiveLimits(user.id),
 			]);
 			const hasCfConfigured = !!selectedGateway;
 
@@ -44,6 +47,15 @@ export class LimitsController extends BaseController {
 			// and would give clients a misleading `maxValue: null` with
 			// `unlimited: false` semantics everywhere else.
 			const response = LimitsController.createSuccessResponse({
+				tier: {
+					id: effectiveLimits.tierId,
+					name: effectiveLimits.tierName,
+					maxApps: effectiveLimits.maxApps,
+					dailyAppCreations: effectiveLimits.dailyAppCreations,
+					dailyLlmCredits: effectiveLimits.dailyLlmCredits,
+					features: effectiveLimits.features,
+					hasOverrides: effectiveLimits.hasOverrides,
+				},
 				cloudflareConnectEnabled: isCloudflareGatewayLimitsEnabled(env),
 				config: {
 					...(unlimited ? {} : {

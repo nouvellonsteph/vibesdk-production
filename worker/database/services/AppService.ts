@@ -258,6 +258,27 @@ export class AppService extends BaseService {
     }
 
     /**
+     * Get app by deployment slug
+     */
+    async getAppBySlug(slug: string): Promise<schema.App | null> {
+        const app = await this.getReadDb()
+            .select()
+            .from(schema.apps)
+            .where(eq(schema.apps.slug, slug))
+            .get();
+        return app ?? null;
+    }
+
+    /**
+     * Update app deployment slug
+     */
+    async updateAppSlug(appId: string, slug: string): Promise<boolean> {
+        return this.updateApp(appId, {
+            slug,
+        });
+    }
+
+    /**
      * Update app with GitHub repository URL and visibility
      */
     async updateGitHubRepository(

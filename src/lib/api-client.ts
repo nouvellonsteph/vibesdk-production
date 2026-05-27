@@ -57,6 +57,20 @@ import type{
 	CapabilitiesData,
 	VaultConfigResponse,
 	VaultStatusResponse,
+	// Admin types
+	TiersListData,
+	TierData,
+	TierDeleteData,
+	AdminUsersListData,
+	AdminUserDetailData,
+	AdminUserTierUpdateData,
+	AdminUserRoleUpdateData,
+	AdminUserOverridesData,
+	AdminUserSuspendData,
+	AdminStatsData,
+	CreateTierRequest,
+	UpdateTierRequest,
+	SetUserOverridesRequest,
 } from '@/api-types';
 import {
 	RateLimitExceededError,
@@ -1034,6 +1048,39 @@ class ApiClient {
 		);
 	}
 
+	/**
+	 * Deploy to Cloudflare Workers for Platforms via HTTP POST
+	 */
+	async deployToCloudflare(
+		agentId: string,
+	): Promise<ApiResponse<{ success: boolean; url?: string; deploymentId?: string; error?: string }>> {
+		return this.request(`/api/agent/${agentId}/deploy`, {
+			method: 'POST',
+		});
+	}
+
+	/**
+	 * Set a custom deployment slug for an app
+	 */
+	async setAppSlug(
+		agentId: string,
+		slug: string,
+	): Promise<ApiResponse<{ slug: string }>> {
+		return this.request(`/api/agent/${agentId}/slug`, {
+			method: 'PUT',
+			body: { slug },
+		});
+	}
+
+	/**
+	 * Check if a slug is available
+	 */
+	async checkSlugAvailability(
+		slug: string,
+	): Promise<ApiResponse<{ slug: string; available: boolean }>> {
+		return this.request(`/api/agent/check-slug?slug=${encodeURIComponent(slug)}`);
+	}
+
 	// ===============================
 	// Session Management API Methods
 	// ===============================
@@ -1246,6 +1293,105 @@ class ApiClient {
 		return this.request<{ message: string }>('/api/cloudflare/connection', {
 			method: 'DELETE',
 		});
+	}
+
+	// ===============================
+	// Admin API Methods
+	// ===============================
+
+	/** List all tiers */
+	async adminListTiers(): Promise<ApiResponse<TiersListData>> {
+		return this.request<TiersListData>('/api/admin/tiers');
+	}
+
+	/** Create a new tier */
+	async adminCreateTier(data: CreateTierRequest): Promise<ApiResponse<TierData>> {
+		return this.request<TierData>('/api/admin/tiers', {
+			method: 'POST',
+			body: data,
+		});
+	}
+
+	/** Update a tier */
+	async adminUpdateTier(tierId: string, data: UpdateTierRequest): Promise<ApiResponse<TierData>> {
+		return this.request<TierData>(`/api/admin/tiers/${tierId}`, {
+			method: 'PUT',
+			body: data,
+		});
+	}
+
+	/** Delete a tier */
+	async adminDeleteTier(tierId: string): Promise<ApiResponse<TierDeleteData>> {
+		return this.request<TierDeleteData>(`/api/admin/tiers/${tierId}`, {
+			method: 'DELETE',
+		});
+	}
+
+	/** List users with pagination and filtering */
+	async adminListUsers(params?: {
+		page?: number;
+		limit?: number;
+		search?: string;
+		tierId?: string;
+		role?: string;
+	}): Promise<ApiResponse<AdminUsersListData>> {
+		const queryParams = new URLSearchParams();
+		if (params?.page) queryParams.set('page', params.page.toString());
+		if (params?.limit) queryParams.set('limit', params.limit.toString());
+		if (params?.search) queryParams.set('search', params.search);
+		if (params?.tierId) queryParams.set('tierId', params.tierId);
+		if (params?.role) queryParams.set('role', params.role);
+		const qs = queryParams.toString();
+		return this.request<AdminUsersListData>(`/api/admin/users${qs ? `?${qs}` : ''}`);
+	}
+
+	/** Get detailed user info */
+	async adminGetUser(userId: string): Promise<ApiResponse<AdminUserDetailData>> {
+		return this.request<AdminUserDetailData>(`/api/admin/users/${userId}`);
+	}
+
+	/** Assign a tier to a user */
+	async adminUpdateUserTier(userId: string, tierId: string): Promise<ApiResponse<AdminUserTierUpdateData>> {
+		return this.request<AdminUserTierUpdateData>(`/api/admin/users/${userId}/tier`, {
+			method: 'PUT',
+			body: { tierId },
+		});
+	}
+
+	/** Update user role */
+	async adminUpdateUserRole(userId: string, role: 'user' | 'admin'): Promise<ApiResponse<AdminUserRoleUpdateData>> {
+		return this.request<AdminUserRoleUpdateData>(`/api/admin/users/${userId}/role`, {
+			method: 'PUT',
+			body: { role },
+		});
+	}
+
+	/** Set per-user limit overrides */
+	async adminSetUserOverrides(userId: string, overrides: SetUserOverridesRequest): Promise<ApiResponse<AdminUserOverridesData>> {
+		return this.request<AdminUserOverridesData>(`/api/admin/users/${userId}/overrides`, {
+			method: 'PUT',
+			body: overrides,
+		});
+	}
+
+	/** Remove per-user limit overrides */
+	async adminRemoveUserOverrides(userId: string): Promise<ApiResponse<TierDeleteData>> {
+		return this.request<TierDeleteData>(`/api/admin/users/${userId}/overrides`, {
+			method: 'DELETE',
+		});
+	}
+
+	/** Suspend or unsuspend a user */
+	async adminSuspendUser(userId: string, suspended: boolean): Promise<ApiResponse<AdminUserSuspendData>> {
+		return this.request<AdminUserSuspendData>(`/api/admin/users/${userId}/suspend`, {
+			method: 'PUT',
+			body: { suspended },
+		});
+	}
+
+	/** Get admin dashboard stats */
+	async adminGetStats(): Promise<ApiResponse<AdminStatsData>> {
+		return this.request<AdminStatsData>('/api/admin/stats');
 	}
 }
 

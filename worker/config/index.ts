@@ -1,5 +1,6 @@
 import { ConfigurableSecuritySettings, getConfigurableSecurityDefaults } from "./security";
 import { createLogger } from "../logger";
+import { TierService } from "../database/services/TierService";
 
 const logger = createLogger('GlobalConfigurableSettings');
 
@@ -143,27 +144,25 @@ export async function getUserConfigurableSettings(env: Env, userId: string): Pro
         return conf;
     }
     try {
-        // Try to fetch override config from KV
-        const storedConfigJson = await env.VibecoderStore.get(`user_config:${userId}`);
-        
-        if (!storedConfigJson) {
-            // No stored config, use defaults
-            return globalConfig;
+        // Resolve tier-based limits for this user
+        const tierService = new TierService(env);
+        const limits = await tierService.getUserEffectiveLimits(userId);
+
+        // Clone the global config and apply tier-based rate limits
+        const mergedConfig = structuredClone(globalConfig);
+        const appCreation = mergedConfig.security.rateLimit.appCreation;
+        appCreation.limit = limits.dailyAppCreations;
+        if ('dailyLimit' in appCreation) {
+            appCreation.dailyLimit = limits.dailyAppCreations;
         }
+        mergedConfig.security.rateLimit.llmCalls.limit = limits.dailyLlmCredits;
         
-        // Parse stored configuration
-        const storedConfig: StoredConfig = JSON.parse(storedConfigJson);
-        
-        // Deep merge configurations (stored config overrides defaults)
-        const mergedConfig = deepMerge<GlobalConfigurableSettings>(globalConfig, storedConfig);
-        
-        logger.info(`Loaded configuration with overrides from KV for user ${userId}`, { globalConfig, storedConfig, mergedConfig });
+        logger.info(`Loaded tier-based configuration for user ${userId}`, { tierId: limits.tierId, tierName: limits.tierName, dailyAppCreations: limits.dailyAppCreations, dailyLlmCredits: limits.dailyLlmCredits });
         invocationUserCache.set(userId, mergedConfig);
         return mergedConfig;
         
     } catch (error) {
-        logger.error(`Failed to load configuration from KV for user ${userId}, using defaults`, error);
-        // On error, fallback to default configuration
+        logger.error(`Failed to load tier configuration for user ${userId}, using defaults`, error);
         return globalConfig;
     }
 }

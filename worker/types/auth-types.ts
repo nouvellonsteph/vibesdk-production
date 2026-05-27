@@ -24,6 +24,8 @@ export interface AuthUser {
     emailVerified?: boolean;
     createdAt?: Date;
     isAnonymous?: boolean;
+    role?: 'user' | 'admin';
+    tierId?: string;
 }
 
 /**

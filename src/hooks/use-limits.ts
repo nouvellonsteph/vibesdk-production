@@ -44,7 +44,23 @@ export interface LimitCheckResult {
 	message: string;
 }
 
+export interface TierInfo {
+	id: string;
+	name: string;
+	maxApps: number;
+	dailyAppCreations: number;
+	dailyLlmCredits: number;
+	features: {
+		canDeploy: boolean;
+		canExportGithub: boolean;
+		canUseCustomModels: boolean;
+		canMakePublic: boolean;
+	};
+	hasOverrides: boolean;
+}
+
 export interface UsageSummary {
+	tier?: TierInfo;
 	cloudflareConnectEnabled: boolean;
 	config: {
 		/**

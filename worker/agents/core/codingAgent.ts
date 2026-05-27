@@ -245,6 +245,21 @@ export class CodeGeneratorAgent extends Agent<Env, AgentState> implements AgentI
             templateDetails: this.behavior.getTemplateDetails(),
             previewUrl: previewUrl
         });
+
+        // Auto-trigger code generation if agent is initialized but hasn't started generating.
+        // This handles the case where the frontend's generate_all message doesn't arrive
+        // (e.g. WebSocket reconnect race, partysocket timing).
+        if (
+            this.state.blueprint &&
+            !this.state.mvpGenerated &&
+            !this.behavior.isCodeGenerating()
+        ) {
+            this.logger().info('Auto-triggering code generation on connect (blueprint exists, not yet generating)');
+            this.setState({ ...this.state, shouldBeGenerating: true });
+            this.behavior.generateAllFiles().catch(error => {
+                this.logger().error('Error during auto-triggered code generation:', error);
+            });
+        }
     }
 
     private initLogger(agentId: string, userId: string, sessionId?: string) {
@@ -568,6 +583,9 @@ export class CodeGeneratorAgent extends Agent<Env, AgentState> implements AgentI
      * Delegates to centralized handler which can access both behavior and objective
      */
     async onMessage(connection: Connection, message: string): Promise<void> {
+        let msgType = 'unknown';
+        try { msgType = JSON.parse(message)?.type ?? 'unknown'; } catch { /* non-JSON message */ }
+        this.logger().info(`[onMessage] Received message type=${msgType}`, { connectionId: connection.id, hasBehavior: !!this.behavior });
         await handleWebSocketMessage(this, connection, message);
     }
     

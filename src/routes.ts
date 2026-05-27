@@ -11,6 +11,13 @@ import AppView from './routes/app';
 import DiscoverPage from './routes/discover';
 import { ProtectedRoute } from './routes/protected-route';
 
+// Admin pages (role guard handled inside AdminLayout)
+import AdminLayout from './pages/admin/admin-layout';
+import AdminDashboard from './pages/admin/admin-dashboard';
+import AdminUsers from './pages/admin/admin-users';
+import AdminUserDetail from './pages/admin/admin-user-detail';
+import AdminTiers from './pages/admin/admin-tiers';
+
 const routes = [
 	{
 		path: '/',
@@ -43,6 +50,28 @@ const routes = [
 			{
 				path: 'discover',
 				Component: DiscoverPage,
+			},
+			{
+				path: 'admin',
+				Component: AdminLayout,
+				children: [
+					{
+						index: true,
+						Component: AdminDashboard,
+					},
+					{
+						path: 'users',
+						Component: AdminUsers,
+					},
+					{
+						path: 'users/:userId',
+						Component: AdminUserDetail,
+					},
+					{
+						path: 'tiers',
+						Component: AdminTiers,
+					},
+				],
 			},
 		],
 	},

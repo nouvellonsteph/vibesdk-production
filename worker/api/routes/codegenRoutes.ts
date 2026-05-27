@@ -30,4 +30,11 @@ export function setupCodegenRoutes(app: Hono<AppEnv>): void {
     app.get('/api/agent/:agentId/connect', setAuthLevel(AuthConfig.ownerOnly), adaptController(CodingAgentController, CodingAgentController.connectToExistingAgent));
 
     app.get('/api/agent/:agentId/preview', setAuthLevel(AuthConfig.authenticated), adaptController(CodingAgentController, CodingAgentController.deployPreview));
+
+    // Deploy to Cloudflare Workers for Platforms (HTTP POST, bypasses WebSocket)
+    app.post('/api/agent/:agentId/deploy', setAuthLevel(AuthConfig.ownerOnly), adaptController(CodingAgentController, CodingAgentController.deployToCloudflare));
+
+    // Slug management
+    app.put('/api/agent/:agentId/slug', setAuthLevel(AuthConfig.ownerOnly), adaptController(CodingAgentController, CodingAgentController.setSlug));
+    app.get('/api/agent/check-slug', setAuthLevel(AuthConfig.authenticated), adaptController(CodingAgentController, CodingAgentController.checkSlug));
 }

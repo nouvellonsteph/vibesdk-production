@@ -665,6 +665,8 @@ export class AuthService extends BaseService {
                     provider: schema.users.provider,
                     emailVerified: schema.users.emailVerified,
                     createdAt: schema.users.createdAt,
+                    role: schema.users.role,
+                    tierId: schema.users.tierId,
                 })
                 .from(schema.users)
                 .where(

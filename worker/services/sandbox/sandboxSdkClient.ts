@@ -956,14 +956,14 @@ export class SandboxSdkClient extends BaseSandboxService {
                     this.logger.info('Instance created successfully', { instanceId, processId, port: allocatedPort });
                         
                     // Expose the same port for preview URL
-                    const previewResult = await sandbox.exposePort(allocatedPort, { hostname: getPreviewDomain(env) });
+                    const previewDomain = getPreviewDomain(env);
+                    const previewResult = await sandbox.exposePort(allocatedPort, { hostname: previewDomain });
                     let previewURL = previewResult.url;
-                    if (!isDev(env)) {
-                        const previewDomain = getPreviewDomain(env);
-                        if (previewDomain) {
-                            // Replace CUSTOM_DOMAIN with previewDomain in previewURL
-                            previewURL = previewURL.replace(env.CUSTOM_DOMAIN, previewDomain);
-                        }
+                    // Only remap the domain when CUSTOM_PREVIEW_DOMAIN is not set
+                    // (exposePort already received the correct domain via getPreviewDomain).
+                    // When CUSTOM_PREVIEW_DOMAIN IS set, the URL is already correct.
+                    if (!isDev(env) && !env.CUSTOM_PREVIEW_DOMAIN && previewDomain !== env.CUSTOM_DOMAIN) {
+                        previewURL = previewURL.replace(env.CUSTOM_DOMAIN, previewDomain);
                     }
 
                     this.logger.info('Preview URL exposed', { instanceId, previewURL, tunnelURL });

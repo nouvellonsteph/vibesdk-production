@@ -12,6 +12,30 @@ interface PreviewIframeProps {
 }
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+/**
+ * Convert a preview subdomain URL into a same-origin proxy path.
+ * This avoids Cloudflare Access blocking the cross-origin iframe load.
+ * e.g. https://8001-sessionId-token.vibesdk.example.com/path
+ *   -> /api/sandbox-preview/8001-sessionId-token/path
+ */
+function toProxyUrl(previewUrl: string): string {
+	try {
+		const url = new URL(previewUrl);
+		const hostname = url.hostname;
+		// Extract the subdomain (everything before the first dot)
+		const firstDot = hostname.indexOf('.');
+		if (firstDot === -1) return previewUrl; // not a subdomain URL
+		const subdomain = hostname.substring(0, firstDot);
+		return `/api/sandbox-preview/${subdomain}${url.pathname}${url.search}`;
+	} catch {
+		return previewUrl;
+	}
+}
+
+// ============================================================================
 // Types & Constants
 // ============================================================================
 
@@ -149,6 +173,9 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 		 * Attempt to load the preview with retry logic
 		 */
 		const loadWithRetry = useCallback(async (url: string, attempt: number) => {
+			// Route preview through same-origin proxy to bypass Cloudflare Access
+			const proxyUrl = toProxyUrl(url);
+
 			// Clear any pending retry
 			if (retryTimeoutRef.current) {
 				clearTimeout(retryTimeoutRef.current);
@@ -179,8 +206,8 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 				errorMessage: null,
 			});
 
-			// Test availability
-			const previewType = await testAvailability(url);
+			// Test availability via proxy
+			const previewType = await testAvailability(proxyUrl);
 
 			if (previewType) {
 				// Success: put component into postload state, keep loading UI visible
@@ -188,7 +215,7 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 				setLoadState({
 					status: 'postload',
 					attempt: attempt + 1,
-					loadedSrc: url,
+					loadedSrc: proxyUrl,
 					errorMessage: null,
 					previewType,
 				});

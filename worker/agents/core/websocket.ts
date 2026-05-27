@@ -55,7 +55,12 @@ export async function handleWebSocketMessage(
                 }
                 
                 // Start generation process
-                logger.info('Starting code generation process');
+                logger.info('Starting code generation process', {
+                    hasBehavior: !!agent.getBehavior(),
+                    mvpGenerated: agent.state?.mvpGenerated,
+                    hasBlueprint: !!agent.state?.blueprint,
+                    pendingUserInputs: agent.state?.pendingUserInputs?.length,
+                });
                 agent.getBehavior().generateAllFiles().catch(error => {
                     logger.error('Error during code generation:', error);
                     sendError(connection, `Error generating files: ${error instanceof Error ? error.message : String(error)}`);

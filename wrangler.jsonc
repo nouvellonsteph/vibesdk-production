@@ -157,11 +157,21 @@
             "pattern": "*build-preview.cloudflare.dev/*",
             "custom_domain": false,
             "zone_id": "db01fac4261b2604aacad8410443a3e2"
+        },
+        {
+            "pattern": "vibesdk.justalittlebyte.ovh",
+            "custom_domain": true
+        },
+        {
+            "pattern": "*.vibesdk.justalittlebyte.ovh/*",
+            "custom_domain": false,
+            "zone_id": "d88b6d7f404e420305cd6c9a73c60576"
         }
     ],
 	"vars": {
         "TEMPLATES_REPOSITORY": "https://github.com/cloudflare/vibesdk-templates",
         "ALLOWED_EMAIL": "stephane@cloudflare.com",
+        "ADMIN_EMAILS": "stephane@cloudflare.com",
         "DISPATCH_NAMESPACE": "vibesdk-default-namespace",
         "ENABLE_READ_REPLICAS": "true",
         "CLOUDFLARE_AI_GATEWAY": "vibesdk-gateway",
@@ -180,6 +190,7 @@
             "version": "1.0.0"
         },
         "CUSTOM_DOMAIN": "vibesdk.justalittlebyte.ovh",
+        "CUSTOM_PREVIEW_DOMAIN": "vibesdk.justalittlebyte.ovh",
         "MAX_SANDBOX_INSTANCES": "50",
         "SANDBOX_INSTANCE_TYPE": "standard-4"
     },
