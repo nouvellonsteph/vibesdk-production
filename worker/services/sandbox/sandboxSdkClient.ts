@@ -819,9 +819,12 @@ export class SandboxSdkClient extends BaseSandboxService {
                                 const logLine = event.data;
                                 this.logger.info(`Cloudflared log ===> ${logLine}`);
                                 
-                                // Look for the preview URL in the logs
-                                // Format: https://subdomain.trycloudflare.com
-                                const urlMatch = logLine.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+                                // Look for the preview URL in the logs.
+                                // Tunnel URLs use hyphenated-word subdomains
+                                // (e.g. https://random-words-here.trycloudflare.com).
+                                // Exclude short single-word service subdomains like
+                                // api, update, h2mux that cloudflared logs during startup.
+                                const urlMatch = logLine.match(/https:\/\/[a-z0-9]+-[a-z0-9-]+\.trycloudflare\.com/);
                                 if (urlMatch) {
                                     clearTimeout(timeout);
                                     const previewURL = urlMatch[0];
