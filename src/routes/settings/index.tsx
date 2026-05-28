@@ -58,6 +58,7 @@ import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard';
 // import { SecretsManager } from '@/components/vault';
 // import { ByokApiKeysModal } from '@/components/byok-api-keys-modal';
 import { CloudflareAccountSelector } from '@/components/cloudflare-account-selector';
+import { FileText, Plug, Loader2 } from 'lucide-react';
 
 export default function SettingsPage() {
 	const { user } = useAuth();
@@ -90,6 +91,12 @@ export default function SettingsPage() {
 		copy: copyCreatedKey,
 		reset: resetCreatedKeyCopy,
 	} = useCopyToClipboard();
+
+	// Integrations state
+	const [driveConnected, setDriveConnected] = useState(false);
+	const [driveLoading, setDriveLoading] = useState(true);
+	const [driveConnecting, setDriveConnecting] = useState(false);
+	const [driveDisconnecting, setDriveDisconnecting] = useState(false);
 
 	// Model configurations state
 	const [agentConfigs, setAgentConfigs] = useState<
@@ -416,12 +423,19 @@ export default function SettingsPage() {
 			});
 	}, [formatAgentConfigName, getAgentConfigDescription]);
 
-	// Load sessions and model configs on component mount
+	// Load sessions, model configs, and integrations on component mount
 	React.useEffect(() => {
 		if (user) {
 			loadActiveSessions();
 			loadModelConfigs();
 			loadApiKeys();
+			// Load integrations
+			apiClient.listIntegrations().then((res) => {
+				if (res.data?.integrations) {
+					const drive = res.data.integrations.find((i) => i.provider === 'google_drive');
+					setDriveConnected(drive?.isActive ?? false);
+				}
+			}).catch(() => {}).finally(() => setDriveLoading(false));
 		}
 	}, [user]);
 
@@ -924,6 +938,102 @@ export default function SettingsPage() {
 										</div>
 									))
 								)}
+							</div>
+						</CardContent>
+					</Card>
+
+					{/* Integrations Section */}
+					<Card id="integrations">
+						<CardHeader variant="minimal">
+							<div className="flex items-center gap-3 border-b w-full py-3 text-text-primary">
+								<Plug className="h-5 w-5" />
+								<div>
+									<CardTitle>Integrations</CardTitle>
+								</div>
+							</div>
+						</CardHeader>
+						<CardContent className="space-y-4 mt-4 px-6">
+							{/* Google Drive */}
+							<div className="flex items-center justify-between p-4 border rounded-lg">
+								<div className="flex items-center gap-4">
+									<div className="flex items-center justify-center w-10 h-10 rounded-lg bg-blue-500/10">
+										<FileText className="h-5 w-5 text-blue-500" />
+									</div>
+									<div>
+										<h4 className="font-medium text-sm">Google Drive</h4>
+										<p className="text-xs text-text-tertiary">
+											{driveConnected
+												? 'Connected. The AI agent can search and read your Google Docs and Sheets.'
+												: 'Connect your Google Drive to use documents as data sources for generated apps.'}
+										</p>
+									</div>
+								</div>
+								<div>
+									{driveLoading ? (
+										<Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+									) : driveConnected ? (
+										<Button
+											variant="outline"
+											size="sm"
+											disabled={driveDisconnecting}
+											onClick={async () => {
+												setDriveDisconnecting(true);
+												try {
+													await apiClient.disconnectGoogleDrive();
+													setDriveConnected(false);
+													toast.success('Google Drive disconnected');
+												} catch {
+													toast.error('Failed to disconnect Google Drive');
+												} finally {
+													setDriveDisconnecting(false);
+												}
+											}}
+										>
+											{driveDisconnecting ? 'Disconnecting...' : 'Disconnect'}
+										</Button>
+									) : (
+										<Button
+											size="sm"
+											disabled={driveConnecting}
+											onClick={async () => {
+												setDriveConnecting(true);
+												try {
+													const res = await apiClient.connectGoogleDrive();
+													if (res.data?.authUrl) {
+														// Open OAuth popup
+														const popup = window.open(
+															res.data.authUrl,
+															'google_drive_oauth',
+															'width=600,height=700'
+														);
+														// Listen for completion
+														const onMessage = (event: MessageEvent) => {
+															if (event.data?.type === 'drive-connected') {
+																setDriveConnected(true);
+																toast.success('Google Drive connected');
+																window.removeEventListener('message', onMessage);
+															}
+														};
+														window.addEventListener('message', onMessage);
+														// Poll for popup close
+														const interval = setInterval(() => {
+															if (popup?.closed) {
+																clearInterval(interval);
+																setDriveConnecting(false);
+																window.removeEventListener('message', onMessage);
+															}
+														}, 500);
+													}
+												} catch {
+													toast.error('Failed to initiate Google Drive connection');
+													setDriveConnecting(false);
+												}
+											}}
+										>
+											{driveConnecting ? 'Connecting...' : 'Connect Google Drive'}
+										</Button>
+									)}
+								</div>
 							</div>
 						</CardContent>
 					</Card>

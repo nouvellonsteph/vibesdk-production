@@ -1399,6 +1399,29 @@ class ApiClient {
 		return this.request<AdminStatsData>('/api/admin/stats');
 	}
 
+	// ===============================
+	// Integration API Methods
+	// ===============================
+
+	/** List user's integrations */
+	async listIntegrations(): Promise<ApiResponse<{ integrations: Array<{ provider: string; isActive: boolean; scopes: string[]; connectedAt: Date | null }> }>> {
+		return this.request('/api/integrations');
+	}
+
+	/** Initiate Google Drive OAuth connection */
+	async connectGoogleDrive(): Promise<ApiResponse<{ authUrl: string }>> {
+		return this.request('/api/integrations/google-drive/connect', {
+			method: 'POST',
+		});
+	}
+
+	/** Disconnect Google Drive */
+	async disconnectGoogleDrive(): Promise<ApiResponse<{ success: boolean }>> {
+		return this.request('/api/integrations/google-drive', {
+			method: 'DELETE',
+		});
+	}
+
 	/** List all egress rules */
 	async adminListEgressRules(): Promise<ApiResponse<EgressRulesListData>> {
 		return this.request<EgressRulesListData>('/api/admin/egress-rules');
