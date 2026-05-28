@@ -1760,39 +1760,51 @@ export class SandboxSdkClient extends BaseSandboxService {
             // Vite dev mode but is NOT bundled by wrangler/esbuild. We replace it with
             // a static import using the sandbox SDK's readFile/writeFile (no shell needed).
             this.logger.info('Patching dynamic imports for production build');
-            const srcPath = `/workspace/${instanceId}/src/index.ts`;
-            const patchSession = await this.getInstanceSession(instanceId);
-            const srcFile = await patchSession.readFile(srcPath);
+            try {
+                // Find the entry file -- templates may use src/index.ts or index.ts
+                const patchSession = await this.getInstanceSession(instanceId);
+                const basePath = `/workspace/${instanceId}`;
+                let entryPath: string | null = null;
+                let content: string | null = null;
 
-            if (srcFile.success && srcFile.content.includes('@vite-ignore')) {
-                let content = srcFile.content;
-
-                // Add static import if not already present
-                if (!content.includes('import { userRoutes }')) {
-                    content = 'import { userRoutes } from "./user-routes";\n' + content;
+                for (const candidate of ['src/index.ts', 'src/index.tsx', 'index.ts', 'index.tsx']) {
+                    try {
+                        const result = await patchSession.readFile(`${basePath}/${candidate}`);
+                        if (result.success && result.content.includes('@vite-ignore')) {
+                            entryPath = `${basePath}/${candidate}`;
+                            content = result.content;
+                            break;
+                        }
+                    } catch {
+                        // File doesn't exist, try next
+                    }
                 }
 
-                // Replace the dynamic import with a static reference.
-                // Permissive regex: handles optional parens, any variable name, whitespace variations.
-                const before = content;
-                content = content.replace(
-                    /const\s+\w+\s*=\s*\(?await\s+import\([^)]*@vite-ignore[^)]*\)\)?[^;]*;/,
-                    'const mod = { userRoutes } as UserRoutesModule;'
-                );
+                if (entryPath && content) {
+                    // Add static import if not already present
+                    if (!content.includes('import { userRoutes }')) {
+                        content = 'import { userRoutes } from "./user-routes";\n' + content;
+                    }
 
-                if (content !== before) {
-                    await patchSession.writeFile(srcPath, content);
-                    this.logger.info('Patched dynamic import to static import for production build');
+                    // Replace the dynamic import with a static reference.
+                    const before = content;
+                    content = content.replace(
+                        /const\s+\w+\s*=\s*\(?await\s+import\([^)]*@vite-ignore[^)]*\)\)?[^;]*;/,
+                        'const mod = { userRoutes } as UserRoutesModule;'
+                    );
+
+                    if (content !== before) {
+                        await patchSession.writeFile(entryPath, content);
+                        this.logger.info('Patched dynamic import to static import', { entryPath });
+                    } else {
+                        this.logger.warn('Dynamic import regex did not match', { entryPath });
+                    }
                 } else {
-                    this.logger.warn('Dynamic import regex did not match -- template format may have changed', {
-                        hint: 'The @vite-ignore marker was found but the import() pattern was not recognized'
-                    });
+                    this.logger.info('No dynamic import patch needed');
                 }
-            } else {
-                this.logger.info('No dynamic import patch needed', {
-                    fileExists: srcFile.success,
-                    hasViteIgnore: srcFile.success ? srcFile.content.includes('@vite-ignore') : false
-                });
+            } catch (error) {
+                // Patch failure should not block the deploy
+                this.logger.warn('Dynamic import patch failed (non-fatal)', error);
             }
 
             // Step 1: Run build commands (bun run build && bunx wrangler build)
