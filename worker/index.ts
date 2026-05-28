@@ -14,7 +14,7 @@ import { authMiddleware } from './middleware/auth/auth';
 
 // Durable Object and Service exports
 // Custom sandbox with egress control (replaces plain Sandbox re-export)
-export { UserAppSandboxService, ContainerProxy } from './services/sandbox/UserAppSandbox';
+export { UserAppSandboxService } from './services/sandbox/UserAppSandbox';
 export { CodeGeneratorAgent } from './agents/core/codingAgent';
 export { UserSecretsStore } from './services/secrets/UserSecretsStore';
 

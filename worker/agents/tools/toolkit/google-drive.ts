@@ -26,7 +26,7 @@ export function createGoogleDriveSearchTool(
 			'or when you need to find data sources for the application being built. ' +
 			'Returns a list of matching files with their IDs, names, and types.',
 		args: {
-			query: t.string('Search query to find files by name or content'),
+			query: t.string().describe('Search query to find files by name or content'),
 		},
 		run: async ({ query }) => {
 			try {
@@ -79,7 +79,7 @@ export function createGoogleDriveReadTool(
 			'Google Docs are returned as plain text, Sheets as CSV, other files as raw text. ' +
 			'Use the file ID from google_drive_search results.',
 		args: {
-			fileId: t.string('The Google Drive file ID (from search results)'),
+			fileId: t.string().describe('The Google Drive file ID (from search results)'),
 		},
 		run: async ({ fileId }) => {
 			try {

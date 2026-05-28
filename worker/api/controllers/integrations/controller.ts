@@ -20,7 +20,6 @@ import type { ControllerResponse, ApiResponse } from '../types';
 import type {
 	IntegrationsListData,
 	IntegrationConnectData,
-	IntegrationCallbackData,
 	IntegrationDisconnectData,
 	DriveFilesListData,
 	DriveFileContentData,

@@ -97,7 +97,7 @@ export class IntegrationService extends BaseService {
 		userId: string,
 		provider: IntegrationProvider
 	): Promise<boolean> {
-		const result = await this.database
+		await this.database
 			.update(schema.userIntegrations)
 			.set({
 				isActive: false,

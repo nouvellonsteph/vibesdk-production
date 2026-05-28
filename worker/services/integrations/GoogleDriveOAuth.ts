@@ -5,7 +5,6 @@
  */
 
 import { createLogger } from '../../logger';
-import { generateSecureToken } from '../../utils/cryptoUtils';
 import { encryptTokens, decryptTokens, type EncryptedTokenData } from '../../utils/tokenEncryption';
 
 const logger = createLogger('GoogleDriveOAuth');

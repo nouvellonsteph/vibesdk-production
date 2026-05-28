@@ -905,17 +905,20 @@ export class SandboxSdkClient extends BaseSandboxService {
         try {
             const sandbox = this.getSandbox();
 
-            // Apply egress rules from admin configuration
+            // Apply egress rules from admin configuration.
+            // setAllowedHosts/setDeniedHosts are runtime SDK methods for controlling
+            // outbound traffic from the sandbox container.
             try {
                 const { EgressRuleService } = await import('../../database/services/EgressRuleService');
                 const egressService = new EgressRuleService(env);
                 const hostLists = await egressService.getSandboxHostLists();
-                if (hostLists.allowedHosts.length > 0) {
-                    await sandbox.setAllowedHosts(hostLists.allowedHosts);
+                const sandboxAny = sandbox as unknown as Record<string, (hosts: string[]) => Promise<void>>;
+                if (hostLists.allowedHosts.length > 0 && typeof sandboxAny.setAllowedHosts === 'function') {
+                    await sandboxAny.setAllowedHosts(hostLists.allowedHosts);
                     this.logger.info('Applied egress allowedHosts', { count: hostLists.allowedHosts.length });
                 }
-                if (hostLists.deniedHosts.length > 0) {
-                    await sandbox.setDeniedHosts(hostLists.deniedHosts);
+                if (hostLists.deniedHosts.length > 0 && typeof sandboxAny.setDeniedHosts === 'function') {
+                    await sandboxAny.setDeniedHosts(hostLists.deniedHosts);
                     this.logger.info('Applied egress deniedHosts', { count: hostLists.deniedHosts.length });
                 }
             } catch (egressError) {

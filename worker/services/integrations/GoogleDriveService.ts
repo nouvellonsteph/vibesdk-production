@@ -9,7 +9,6 @@ import { createLogger } from '../../logger';
 const logger = createLogger('GoogleDriveService');
 
 const DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3';
-const DOCS_API_BASE = 'https://docs.googleapis.com/v1';
 
 export interface DriveFile {
 	id: string;
