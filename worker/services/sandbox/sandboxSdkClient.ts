@@ -1757,53 +1757,54 @@ export class SandboxSdkClient extends BaseSandboxService {
             
             // Step 0: Patch dynamic imports that break in production builds.
             // The template uses `await import(/* @vite-ignore */ ...)` which works in
-            // Vite dev mode but is NOT bundled by wrangler/esbuild. We replace it with
-            // a static import using the sandbox SDK's readFile/writeFile (no shell needed).
+            // Vite dev mode but is NOT bundled by wrangler/esbuild.
+            // Strategy: find the file, add static import, replace the dynamic import line.
+            // Uses executeCommand (CWD = /workspace/{instanceId}/).
             this.logger.info('Patching dynamic imports for production build');
             try {
-                // Find the entry file -- templates may use src/index.ts or index.ts
-                const patchSession = await this.getInstanceSession(instanceId);
-                const basePath = `/workspace/${instanceId}`;
-                let entryPath: string | null = null;
-                let content: string | null = null;
+                // Find the entry file containing @vite-ignore
+                const findResult = await this.executeCommand(instanceId,
+                    'find . -maxdepth 3 -name "*.ts" -o -name "*.tsx" | xargs grep -l "@vite-ignore" 2>/dev/null || true'
+                );
+                const files = findResult.stdout.trim().split('\n').filter(Boolean);
+                this.logger.info('Files with @vite-ignore', { files, cwd: `/workspace/${instanceId}` });
 
-                for (const candidate of ['src/index.ts', 'src/index.tsx', 'index.ts', 'index.tsx']) {
-                    try {
-                        const result = await patchSession.readFile(`${basePath}/${candidate}`);
-                        if (result.success && result.content.includes('@vite-ignore')) {
-                            entryPath = `${basePath}/${candidate}`;
-                            content = result.content;
-                            break;
-                        }
-                    } catch {
-                        // File doesn't exist, try next
-                    }
-                }
+                for (const file of files) {
+                    // Read the file content
+                    const catResult = await this.executeCommand(instanceId, `cat "${file}"`);
+                    if (catResult.exitCode !== 0) continue;
 
-                if (entryPath && content) {
-                    // Add static import if not already present
+                    let content = catResult.stdout;
+
+                    // Add static import if missing
                     if (!content.includes('import { userRoutes }')) {
                         content = 'import { userRoutes } from "./user-routes";\n' + content;
                     }
 
-                    // Replace the dynamic import with a static reference.
-                    const before = content;
-                    content = content.replace(
-                        /const\s+\w+\s*=\s*\(?await\s+import\([^)]*@vite-ignore[^)]*\)\)?[^;]*;/,
-                        'const mod = { userRoutes } as UserRoutesModule;'
-                    );
+                    // Replace the line containing @vite-ignore with static assignment
+                    const lines = content.split('\n');
+                    const patched = lines.map(line => {
+                        if (line.includes('@vite-ignore') && line.includes('import(')) {
+                            return '    const mod = { userRoutes } as UserRoutesModule;';
+                        }
+                        return line;
+                    });
+                    content = patched.join('\n');
 
-                    if (content !== before) {
-                        await patchSession.writeFile(entryPath, content);
-                        this.logger.info('Patched dynamic import to static import', { entryPath });
-                    } else {
-                        this.logger.warn('Dynamic import regex did not match', { entryPath });
-                    }
-                } else {
-                    this.logger.info('No dynamic import patch needed');
+                    // Write back using the sandbox session's writeFile
+                    const absPath = `/workspace/${instanceId}/${file.replace(/^\.\//, '')}`;
+                    const writeSession = await this.getInstanceSession(instanceId);
+                    await writeSession.writeFile(absPath, content);
+
+                    // Verify
+                    const verify = await this.executeCommand(instanceId, `head -5 "${file}"`);
+                    this.logger.info('Patched file', { file, head: verify.stdout });
+                }
+
+                if (files.length === 0) {
+                    this.logger.info('No files with @vite-ignore found, no patch needed');
                 }
             } catch (error) {
-                // Patch failure should not block the deploy
                 this.logger.warn('Dynamic import patch failed (non-fatal)', error);
             }
 
