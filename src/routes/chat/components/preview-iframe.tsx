@@ -173,9 +173,6 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 		 * Attempt to load the preview with retry logic
 		 */
 		const loadWithRetry = useCallback(async (url: string, attempt: number) => {
-			// Route preview through same-origin proxy to bypass Cloudflare Access
-			const proxyUrl = toProxyUrl(url);
-
 			// Clear any pending retry
 			if (retryTimeoutRef.current) {
 				clearTimeout(retryTimeoutRef.current);
@@ -206,8 +203,8 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 				errorMessage: null,
 			});
 
-			// Test availability via proxy
-			const previewType = await testAvailability(proxyUrl);
+			// Test availability
+			const previewType = await testAvailability(url);
 
 			if (previewType) {
 				// Success: put component into postload state, keep loading UI visible
@@ -215,7 +212,7 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 				setLoadState({
 					status: 'postload',
 					attempt: attempt + 1,
-					loadedSrc: proxyUrl,
+					loadedSrc: url,
 					errorMessage: null,
 					previewType,
 				});

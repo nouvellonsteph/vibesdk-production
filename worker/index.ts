@@ -226,27 +226,6 @@ const worker = {
 					headers.delete('X-Frame-Options');
 					headers.delete('Content-Security-Policy');
 
-					// For HTML responses, inject a <base> tag so all asset paths
-					// resolve through the proxy (bypassing Cloudflare Access).
-					const contentType = headers.get('Content-Type') || '';
-					if (contentType.includes('text/html')) {
-						const basePath = `/api/sandbox-preview/${subdomain}/`;
-						let html = await sandboxResponse.text();
-						if (html.includes('<head>')) {
-							html = html.replace('<head>', `<head><base href="${basePath}">`);
-						} else if (html.includes('<head ')) {
-							html = html.replace(/<head([^>]*)>/, `<head$1><base href="${basePath}">`);
-						} else {
-							html = `<base href="${basePath}">` + html;
-						}
-						headers.set('Content-Length', new TextEncoder().encode(html).length.toString());
-						return new Response(html, {
-							status: sandboxResponse.status,
-							statusText: sandboxResponse.statusText,
-							headers,
-						});
-					}
-
 					return new Response(sandboxResponse.body, {
 						status: sandboxResponse.status,
 						statusText: sandboxResponse.statusText,
