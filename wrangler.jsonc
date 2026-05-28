@@ -59,11 +59,7 @@
         {
             "binding": "DISPATCHER",
             "namespace": "vibesdk-default-namespace",
-            "remote": true,
-            "outbound": {
-                "service": "vibesdk-outbound-worker",
-                "parameters": ["app_name"]
-            }
+            "remote": true
         }
     ],
 	"containers": [

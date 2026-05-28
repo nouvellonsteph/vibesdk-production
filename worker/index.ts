@@ -117,14 +117,7 @@ async function handleUserAppRequest(request: Request, env: Env): Promise<Respons
 	const dispatcher = env['DISPATCHER'];
 
 	try {
-		const worker = dispatcher.get(
-			appName,
-			{},
-			{
-				// Pass app name to outbound worker for Drive API token injection
-				outbound: { app_name: { customer_name: appName, url: request.url } },
-			}
-		);
+		const worker = dispatcher.get(appName);
 		const dispatcherResponse = await worker.fetch(request);
 
 		// Add headers to identify this as a dispatcher response
