@@ -17,6 +17,14 @@ import { toast } from 'sonner';
 import { useLimitsContext } from '@/contexts/limits-context';
 import { checkCanSendPrompt } from '@/utils/usage-limit-checker';
 import { PromptBox } from '@/components/prompt-box';
+import { apiClient } from '@/lib/api-client';
+import { FileText, Check } from 'lucide-react';
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+	TooltipProvider,
+} from '@/components/ui/tooltip';
 
 export default function Home() {
 	const navigate = useNavigate();
@@ -31,6 +39,52 @@ export default function Home() {
 	const handleConnectCloudflare = useCallback(() => {
 		window.location.href = `/oauth/login?return_url=${encodeURIComponent(window.location.href)}`;
 	}, []);
+
+	// Google Drive integration
+	const [driveAvailable, setDriveAvailable] = useState(false);
+	const [driveConnected, setDriveConnected] = useState(false);
+	const [driveConnecting, setDriveConnecting] = useState(false);
+
+	useEffect(() => {
+		if (user) {
+			apiClient.listIntegrations().then((res) => {
+				if (res.data) {
+					const avail = (res.data as { available?: { googleDrive?: { configured: boolean; enabled: boolean; tierAllowed: boolean } } }).available?.googleDrive;
+					setDriveAvailable(!!(avail?.configured && avail?.enabled && avail?.tierAllowed));
+					const drive = (res.data as { integrations?: Array<{ provider: string; isActive: boolean }> }).integrations?.find((i) => i.provider === 'google_drive');
+					if (drive?.isActive) setDriveConnected(true);
+				}
+			}).catch(() => {});
+		}
+	}, [user]);
+
+	const handleConnectDrive = async () => {
+		setDriveConnecting(true);
+		try {
+			const res = await apiClient.connectGoogleDrive();
+			if (res.data?.authUrl) {
+				const popup = window.open(res.data.authUrl, 'google_drive_oauth', 'width=600,height=700');
+				const onMessage = (event: MessageEvent) => {
+					if (event.data?.type === 'drive-connected') {
+						setDriveConnected(true);
+						toast.success('Google Drive connected -- mention your docs in the prompt!');
+						window.removeEventListener('message', onMessage);
+					}
+				};
+				window.addEventListener('message', onMessage);
+				const interval = setInterval(() => {
+					if (popup?.closed) {
+						clearInterval(interval);
+						setDriveConnecting(false);
+						window.removeEventListener('message', onMessage);
+					}
+				}, 500);
+			}
+		} catch {
+			toast.error('Failed to connect Google Drive');
+			setDriveConnecting(false);
+		}
+	};
 
 	const modeOptions = useMemo<ProjectModeOption[]>(() => {
 		if (isLoadingCapabilities || !capabilities) return [];
@@ -212,6 +266,42 @@ export default function Home() {
 								) : undefined
 							}
 						/>
+						{/* Tools bar -- integrations available for the prompt */}
+						{driveAvailable && (
+							<div className="flex items-center gap-2 mt-3 ml-1">
+								<span className="text-xs text-text-tertiary">Data sources:</span>
+								<TooltipProvider delayDuration={200}>
+									<Tooltip>
+										<TooltipTrigger asChild>
+											<button
+												type="button"
+												onClick={driveConnected ? undefined : handleConnectDrive}
+												disabled={driveConnecting}
+												className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
+													driveConnected
+														? 'bg-green-500/10 text-green-500 border border-green-500/20 cursor-default'
+														: 'bg-bg-3/80 hover:bg-accent/10 text-text-secondary hover:text-accent border border-text/10 hover:border-accent/30'
+												}`}
+											>
+												{driveConnecting ? (
+													<Loader2 className="h-3.5 w-3.5 animate-spin" />
+												) : driveConnected ? (
+													<Check className="h-3.5 w-3.5" />
+												) : (
+													<FileText className="h-3.5 w-3.5" />
+												)}
+												Google Drive
+											</button>
+										</TooltipTrigger>
+										<TooltipContent side="bottom" className="text-xs max-w-64">
+											{driveConnected
+												? 'Connected. Mention your Google Docs or Sheets in the prompt and the AI will use them as data sources.'
+												: 'Connect your Google Drive to build apps using your documents and spreadsheets as data sources.'}
+										</TooltipContent>
+									</Tooltip>
+								</TooltipProvider>
+							</div>
+						)}
 					</motion.div>
 
 				</div>
