@@ -71,14 +71,14 @@ const routes = [
 						path: 'users/:userId',
 						Component: AdminUserDetail,
 					},
-			{
-				path: 'tiers',
-				Component: AdminTiers,
-			},
-			{
-				path: 'egress',
-				Component: AdminEgress,
-			},
+					{
+						path: 'tiers',
+						Component: AdminTiers,
+					},
+					{
+						path: 'egress',
+						Component: AdminEgress,
+					},
 				],
 			},
 		],
