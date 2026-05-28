@@ -112,6 +112,23 @@ const SYSTEM_PROMPT = `You are Orange, the conversational AI interface for Cloud
   - alter_blueprint: Patch the blueprint with allowed fields only (title, description, views, userFlow, frameworks, etc.).
   - web_search: Search the web for information.
   - feedback: Submit user feedback to the platform.
+  - google_drive_search: Search the user's Google Drive for documents and spreadsheets. Only available when user has connected Google Drive.
+  - google_drive_read: Read content from a Google Drive file (Docs as text, Sheets as CSV). Use the file ID from search results.
+
+## GOOGLE DRIVE DATA SOURCES:
+When the user provides a Google Docs/Sheets URL or mentions their documents:
+1. Use google_drive_search or google_drive_read to fetch the data at design time
+2. Analyze the structure (columns, data types, relationships)
+3. Generate the app code to fetch data at RUNTIME using: \`fetch('http://drive.api/drive/v3/files/{fileId}/export?mimeType=text/csv')\`
+4. NEVER embed OAuth tokens in generated code -- the \`drive.api\` virtual host handles authentication transparently
+5. The app should fetch fresh data on each load, not use hardcoded snapshots
+
+Example runtime code pattern for the generated app:
+\`\`\`typescript
+// Fetch spreadsheet data at runtime (token injected by platform)
+const response = await fetch('http://drive.api/drive/v3/files/SPREADSHEET_ID/export?mimeType=text/csv');
+const csvData = await response.text();
+\`\`\`
 
 ## EFFICIENT TOOL USAGE:
 When you need to use multiple tools, call them all in a single response. The system automatically handles parallel execution for independent operations:
@@ -347,12 +364,33 @@ export class UserConversationProcessor extends AgentOperation<GenerationContext,
 
             const toolCallRenderer = buildToolCallRenderer(inputs.conversationResponseCallback, aiConversationId);
 
+            // Load Google Drive token if user has the integration connected
+            let driveAccessToken: string | undefined;
+            try {
+                const { IntegrationService } = await import('../../database/services/IntegrationService');
+                const { decryptDriveToken } = await import('../../services/integrations/GoogleDriveOAuth');
+                const integrationService = new IntegrationService(options.env);
+                const userId = options.context.query ? options.agentId : ''; // agentId maps to app which has userId
+                // Get userId from agent state via the agent interface
+                const agentState = (agent as unknown as { state?: { metadata?: { userId?: string } } }).state;
+                const actualUserId = agentState?.metadata?.userId;
+                if (actualUserId) {
+                    const integration = await integrationService.getIntegration(actualUserId, 'google_drive');
+                    if (integration?.isActive && integration.accessTokenEncrypted) {
+                        driveAccessToken = await decryptDriveToken(options.env, integration.accessTokenEncrypted) ?? undefined;
+                    }
+                }
+            } catch {
+                // Drive integration not available, proceed without it
+            }
+
             // Assemble all tools with lifecycle callbacks for UI updates
             const tools = buildTools(
                 agent,
                 logger,
                 toolCallRenderer,
-                (chunk: string) => inputs.conversationResponseCallback(chunk, aiConversationId, true)
+                (chunk: string) => inputs.conversationResponseCallback(chunk, aiConversationId, true),
+                { driveAccessToken },
             ).map(td => ({
                 ...td,
                 onStart: (_tc: ChatCompletionMessageFunctionToolCall, args: Record<string, unknown>) => Promise.resolve(toolCallRenderer({ name: td.name, status: 'start', args })),

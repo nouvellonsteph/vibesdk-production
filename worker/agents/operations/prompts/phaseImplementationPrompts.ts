@@ -20,6 +20,16 @@ export const PHASE_IMPLEMENTATION_SYSTEM_PROMPT = `You are implementing a phase 
 - No whole-store selectors.
 </RELIABILITY>
 
+<DATA_SOURCES>
+If the app needs to access Google Drive/Docs/Sheets data at runtime:
+- Use the virtual host: fetch('http://drive.api/drive/v3/files/{fileId}/export?mimeType=text/csv') for Sheets
+- Use: fetch('http://drive.api/drive/v3/files/{fileId}/export?mimeType=text/plain') for Docs
+- Use: fetch('http://drive.api/drive/v3/files') to list files
+- NEVER embed OAuth tokens or API keys in the generated code
+- The drive.api host handles authentication transparently via the platform
+- Parse CSV data using simple string splitting or a lightweight CSV parser
+</DATA_SOURCES>
+
 ${PROMPT_UTILS.UI_NON_NEGOTIABLES_V3}
 
 ${PROMPT_UTILS.COMMON_PITFALLS}
