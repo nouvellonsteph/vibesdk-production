@@ -88,35 +88,9 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 		 * Returns preview type if accessible, 'access-blocked' if auth needed, null otherwise.
 		 */
 		const testAvailability = useCallback(async (url: string): Promise<'sandbox' | 'dispatcher' | 'access-blocked' | null> => {
-			// If we have an Access token, check via the same-origin proxy.
-			// The proxy forwards the token as Authorization header to the sandbox,
-			// bypassing Access entirely (internal DO RPC, not HTTP to subdomain).
-			const token = accessToken || getAccessToken(url);
-			if (token) {
-				try {
-					const proxyUrl = toProxyUrl(url, token);
-					const response = await fetch(proxyUrl, {
-						method: 'HEAD',
-						cache: 'no-cache',
-						credentials: 'include',
-						signal: AbortSignal.timeout(8000),
-					});
-					if (response.ok) {
-						const previewType = response.headers.get('X-Preview-Type');
-						if (previewType === 'sandbox-error') return null;
-						return (previewType === 'sandbox' || previewType === 'dispatcher') ? previewType : 'sandbox';
-					}
-					if (response.status === 401) {
-						const refreshed = await refreshAccessToken(url);
-						if (refreshed) setAccessToken(refreshed);
-						return null;
-					}
-				} catch {
-					return null;
-				}
-			}
-
-			// No token -- try direct access to detect if Access blocks it
+			// Always try direct access first. After OAuth popup authentication,
+			// Access sets the CF_Authorization cookie for the preview domain,
+			// so subsequent requests should pass through.
 			try {
 				const response = await fetch(url, {
 					method: 'HEAD',
@@ -126,6 +100,7 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 					signal: AbortSignal.timeout(8000),
 				});
 
+				// Detect Access blocking (redirect or 401)
 				if (response.redirected && response.url.includes('cloudflareaccess.com')) {
 					return 'access-blocked';
 				}
@@ -142,7 +117,7 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 				// CORS error from Access redirect means blocked
 				return 'access-blocked';
 			}
-		}, [accessToken]);
+		}, []);
 
 		/**
 		 * Request automatic redeployment via WebSocket
@@ -243,17 +218,13 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 			}
 
 			if (previewType) {
-				// If authenticated via OAuth, load through the proxy to strip X-Frame-Options.
-				// The proxy injects a <base> tag pointing to the subdomain, so Vite assets
-				// load directly from the subdomain (authenticated via CF_Authorization cookie).
-				const token = accessToken || getAccessToken(url);
-				const iframeSrc = token ? toProxyUrl(url, token) : url;
-
-				console.log(`Preview available (${previewType}) at attempt ${attempt + 1}, via ${token ? 'proxy' : 'direct'}`);
+				// After OAuth authentication, the CF_Authorization cookie is set
+				// for the preview domain. Load iframe directly from subdomain.
+				console.log(`Preview available (${previewType}) at attempt ${attempt + 1}`);
 				setLoadState({
 					status: 'postload',
 					attempt: attempt + 1,
-					loadedSrc: iframeSrc,
+					loadedSrc: url,
 					errorMessage: null,
 					previewType,
 				});
@@ -285,7 +256,7 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 					loadWithRetry(url, nextAttempt);
 				}, delay);
 			}
-		}, [testAvailability, requestScreenshot, requestRedeploy, accessToken]);
+		}, [testAvailability, requestScreenshot, requestRedeploy]);
 
 		/**
 		 * Force a fresh reload from scratch
