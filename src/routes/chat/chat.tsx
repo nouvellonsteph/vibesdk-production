@@ -200,16 +200,21 @@ export default function Chat() {
 	const { data: limitsData, loading: limitsLoading } = useLimitsContext();
 	const [showLimitDialog, setShowLimitDialog] = useState<React.ReactElement | null>(null);
 
-	// Google Drive: check if tier allows it and load connection status
-	const driveAllowed = limitsData?.tier?.features?.canUseGoogleDrive ?? false;
+	// Google Drive: check if admin configured it, tier allows it, and user connected it
+	const [driveAvailable, setDriveAvailable] = useState(false);
 	useEffect(() => {
-		if (user && driveAllowed) {
+		if (user) {
 			apiClient.listIntegrations().then((res) => {
-				const drive = res.data?.integrations?.find((i) => i.provider === 'google_drive');
-				if (drive?.isActive) setDriveConnected(true);
+				if (res.data) {
+					const avail = res.data.available?.googleDrive;
+					// Only show Drive tool if admin configured + enabled + tier allows
+					setDriveAvailable(avail?.configured && avail?.enabled && avail?.tierAllowed || false);
+					const drive = res.data.integrations?.find((i: { provider: string }) => i.provider === 'google_drive');
+					if (drive?.isActive) setDriveConnected(true);
+				}
 			}).catch(() => {});
 		}
-	}, [user, driveAllowed]);
+	}, [user]);
 	
 	// Debug: Log when backend error dialog state changes
 	useEffect(() => {
@@ -897,7 +902,7 @@ export default function Chat() {
 					limitsData={limitsData}
 					onConnectCloudflare={() => { window.location.href = `/oauth/login?return_url=${encodeURIComponent(window.location.href)}`; }}
 					driveConnected={driveConnected}
-					driveAllowed={driveAllowed}
+					driveAllowed={driveAvailable}
 					onDriveStatusChange={setDriveConnected}
 				/>
 				</motion.div>

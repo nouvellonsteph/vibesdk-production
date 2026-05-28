@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
-import { FileText, Eye, EyeOff } from 'lucide-react';
+import { FileText, Eye, EyeOff, Play } from 'lucide-react';
 
 interface DriveConfig {
 	clientId: string;
@@ -22,6 +22,7 @@ export default function AdminIntegrations() {
 	const [loading, setLoading] = useState(true);
 	const [saving, setSaving] = useState(false);
 	const [showSecret, setShowSecret] = useState(false);
+	const [testing, setTesting] = useState(false);
 
 	// Google Drive form state
 	const [driveClientId, setDriveClientId] = useState('');
@@ -180,7 +181,43 @@ export default function AdminIntegrations() {
 
 					<Separator />
 
-					<div className="flex justify-end">
+					<div className="flex justify-between">
+						<Button
+							variant="outline"
+							onClick={async () => {
+								setTesting(true);
+								try {
+									const res = await apiClient.connectGoogleDrive();
+									if (res.data?.authUrl) {
+										const popup = window.open(res.data.authUrl, 'drive_test', 'width=600,height=700');
+										const onMessage = (event: MessageEvent) => {
+											if (event.data?.type === 'drive-connected') {
+												toast.success('Google Drive integration test successful');
+												window.removeEventListener('message', onMessage);
+											}
+										};
+										window.addEventListener('message', onMessage);
+										const interval = setInterval(() => {
+											if (popup?.closed) {
+												clearInterval(interval);
+												setTesting(false);
+												window.removeEventListener('message', onMessage);
+											}
+										}, 500);
+									} else {
+										toast.error(res.error?.message || 'Failed to initiate test');
+										setTesting(false);
+									}
+								} catch (err) {
+									toast.error(`Test failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+									setTesting(false);
+								}
+							}}
+							disabled={testing || !driveEnabled || !driveClientId}
+						>
+							<Play className="h-4 w-4 mr-2" />
+							{testing ? 'Testing...' : 'Test Connection'}
+						</Button>
 						<Button onClick={handleSave} disabled={saving}>
 							{saving ? 'Saving...' : 'Save Configuration'}
 						</Button>

@@ -44,7 +44,14 @@ export class IntegrationController extends BaseController {
 			const service = new IntegrationService(env);
 			const integrations = await service.listUserIntegrations(user.id);
 
+			// Check which integrations are configured by admin and available to this user
+			const { getDriveConfigStatus } = await import('../../../services/integrations/GoogleDriveOAuth');
+			const driveStatus = await getDriveConfigStatus(env, user.id);
+
 			return IntegrationController.createSuccessResponse<IntegrationsListData>({
+				available: {
+					googleDrive: driveStatus,
+				},
 				integrations: integrations.map((i) => ({
 					provider: i.provider,
 					isActive: i.isActive ?? false,

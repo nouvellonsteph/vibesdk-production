@@ -2,7 +2,16 @@
  * Integration API Types
  */
 
+export interface IntegrationAvailability {
+	configured: boolean; // admin has set client_id/secret
+	enabled: boolean;    // admin has toggled it on
+	tierAllowed: boolean; // user's tier has canUseGoogleDrive
+}
+
 export interface IntegrationsListData {
+	available: {
+		googleDrive: IntegrationAvailability;
+	};
 	integrations: Array<{
 		provider: string;
 		isActive: boolean;

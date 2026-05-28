@@ -71,6 +71,34 @@ export interface DriveTokens {
 }
 
 /**
+ * Get the Drive integration status for a user:
+ * - configured: admin has set client_id/secret
+ * - enabled: admin has toggled it on
+ * - tierAllowed: user's tier has canUseGoogleDrive
+ */
+export async function getDriveConfigStatus(
+	env: Env,
+	userId: string
+): Promise<{ configured: boolean; enabled: boolean; tierAllowed: boolean }> {
+	const creds = await getDriveCredentials(env);
+	const configured = !!(creds.clientId && creds.clientSecret);
+	const enabled = creds.enabled && configured;
+
+	// Check tier
+	let tierAllowed = false;
+	try {
+		const { TierService } = await import('../../database/services/TierService');
+		const tierService = new TierService(env);
+		const limits = await tierService.getUserEffectiveLimits(userId);
+		tierAllowed = limits.features.canUseGoogleDrive;
+	} catch {
+		// Tier check failed, default to false
+	}
+
+	return { configured, enabled, tierAllowed };
+}
+
+/**
  * Build the OAuth authorization URL for Google Drive consent.
  * Reads credentials from admin-configured system settings.
  */
