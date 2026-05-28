@@ -34,6 +34,7 @@ const DEFAULT_FEATURES: TierFeatures = {
 	canExportGithub: false,
 	canUseCustomModels: false,
 	canMakePublic: false,
+	canUseGoogleDrive: false,
 };
 
 const FEATURE_LABELS: Record<keyof TierFeatures, string> = {
@@ -41,6 +42,7 @@ const FEATURE_LABELS: Record<keyof TierFeatures, string> = {
 	canExportGithub: 'GitHub Export',
 	canUseCustomModels: 'Custom Models',
 	canMakePublic: 'Make Public',
+	canUseGoogleDrive: 'Google Drive',
 };
 
 interface TierFormState {
