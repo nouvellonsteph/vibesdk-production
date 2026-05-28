@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, forwardRef, useCallback } from 'react';
 import { RefreshCw, AlertCircle, Shield } from 'lucide-react';
 import { WebSocket } from 'partysocket';
-import { getAccessToken, refreshAccessToken, authenticatePreview } from '@/lib/access-oauth';
+import { authenticatePreview } from '@/lib/access-oauth';
 
 interface PreviewIframeProps {
     src: string;
@@ -15,26 +15,6 @@ interface PreviewIframeProps {
 // ============================================================================
 // Helpers
 // ============================================================================
-
-/**
- * Convert a preview subdomain URL into a same-origin proxy path.
- * Bypasses Cloudflare Access by routing through the main domain's Worker.
- * The Access OAuth token is passed as a query param so the Worker can
- * forward it as an Authorization header to the container.
- */
-function toProxyUrl(previewUrl: string, accessToken?: string): string {
-	try {
-		const url = new URL(previewUrl);
-		const hostname = url.hostname;
-		const firstDot = hostname.indexOf('.');
-		if (firstDot === -1) return previewUrl;
-		const subdomain = hostname.substring(0, firstDot);
-		const tokenParam = accessToken ? `${url.search ? '&' : '?'}cf_access_token=${encodeURIComponent(accessToken)}` : '';
-		return `/api/sandbox-preview/${subdomain}${url.pathname}${url.search}${tokenParam}`;
-	} catch {
-		return previewUrl;
-	}
-}
 
 // ============================================================================
 // Types & Constants
@@ -75,7 +55,6 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 		const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 		const hasRequestedRedeployRef = useRef(false);
         const postLoadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-		const [accessToken, setAccessToken] = useState<string | null>(null);
 		const [isAuthenticating, setIsAuthenticating] = useState(false);
 
 		// ====================================================================

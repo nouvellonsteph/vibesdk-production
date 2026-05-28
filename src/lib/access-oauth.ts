@@ -434,21 +434,21 @@ function openAuthPopup(authUrl: string, expectedState: string): Promise<string> 
 
 			if (error) {
 				cleanup();
-				popup.close();
+				popup?.close();
 				reject(new Error(`OAuth error: ${error}`));
 				return;
 			}
 
 			if (state !== expectedState) {
 				cleanup();
-				popup.close();
+				popup?.close();
 				reject(new Error('OAuth state mismatch'));
 				return;
 			}
 
 			if (code) {
 				cleanup();
-				popup.close();
+				popup?.close();
 				resolve(code);
 			}
 		}

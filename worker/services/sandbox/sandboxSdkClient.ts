@@ -1773,8 +1773,8 @@ export class SandboxSdkClient extends BaseSandboxService {
                 'fs.writeFileSync(f, s);',
                 'console.log("Patched dynamic import to static import");',
             ].join('\n');
-            const session = await this.getInstanceSession(instanceId);
-            await session.writeFile('/tmp/patch-imports.js', patchScript);
+            const patchSession = await this.getInstanceSession(instanceId);
+            await patchSession.writeFile('/tmp/patch-imports.js', patchScript);
             const patchResult = await this.executeCommand(instanceId, 'bun /tmp/patch-imports.js');
             this.logger.info('Patch result', { stdout: patchResult.stdout, stderr: patchResult.stderr, exitCode: patchResult.exitCode });
 
