@@ -1760,13 +1760,23 @@ export class SandboxSdkClient extends BaseSandboxService {
             // Vite dev mode but is NOT bundled by wrangler/esbuild. Replace with a
             // static import so the module is included in the production bundle.
             this.logger.info('Patching dynamic imports for production build');
-            const patchResult = await this.executeCommand(instanceId,
-                `grep -q "@vite-ignore" src/index.ts 2>/dev/null && ` +
-                `sed -i '1i\\import { userRoutes } from "./user-routes";' src/index.ts && ` +
-                `sed -i 's/const mod = .*(await import.*@vite-ignore.*/const mod = { userRoutes } as UserRoutesModule;/' src/index.ts && ` +
-                `echo "Patched dynamic import" || echo "No patch needed"`
-            );
-            this.logger.info('Patch result', { stdout: patchResult.stdout, exitCode: patchResult.exitCode });
+            const patchScript = [
+                'const fs = require("fs");',
+                'const f = "src/index.ts";',
+                'if (!fs.existsSync(f)) { console.log("No src/index.ts found"); process.exit(0); }',
+                'let s = fs.readFileSync(f, "utf8");',
+                'if (!s.includes("@vite-ignore")) { console.log("No dynamic import to patch"); process.exit(0); }',
+                'if (!s.includes("import { userRoutes }")) {',
+                '  s = \'import { userRoutes } from "./user-routes";\\n\' + s;',
+                '}',
+                's = s.replace(/const\\s+mod\\s*=\\s*\\(await\\s+import\\([^)]*@vite-ignore[^)]*\\)\\)[^;]*;/, "const mod = { userRoutes } as UserRoutesModule;");',
+                'fs.writeFileSync(f, s);',
+                'console.log("Patched dynamic import to static import");',
+            ].join('\n');
+            const session = await this.getInstanceSession(instanceId);
+            await session.writeFile('/tmp/patch-imports.js', patchScript);
+            const patchResult = await this.executeCommand(instanceId, 'bun /tmp/patch-imports.js');
+            this.logger.info('Patch result', { stdout: patchResult.stdout, stderr: patchResult.stderr, exitCode: patchResult.exitCode });
 
             // Step 1: Run build commands (bun run build && bunx wrangler build)
             this.logger.info('Building project');
