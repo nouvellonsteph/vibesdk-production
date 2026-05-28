@@ -132,6 +132,7 @@ export default function Chat() {
 		setCloudflareDeploymentUrl,
 		deploymentError,
 		isRedeployReady,
+		setIsRedeployReady,
 		isGenerationPaused,
 		isGenerating,
 		handleStopGeneration,
@@ -166,8 +167,9 @@ export default function Chat() {
 	useEffect(() => {
 		if (app?.cloudflareUrl && !cloudflareDeploymentUrl) {
 			setCloudflareDeploymentUrl(app.cloudflareUrl);
+			setIsRedeployReady(true);
 		}
-	}, [app?.cloudflareUrl, cloudflareDeploymentUrl, setCloudflareDeploymentUrl]);
+	}, [app?.cloudflareUrl, cloudflareDeploymentUrl, setCloudflareDeploymentUrl, setIsRedeployReady]);
 
 	// GitHub export functionality - use urlChatId directly from URL params
 	const githubExport = useGitHubExport(websocket, urlChatId, refetchApp);

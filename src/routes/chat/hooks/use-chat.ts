@@ -750,6 +750,7 @@ export function useChat({
 		setCloudflareDeploymentUrl,
 		deploymentError,
 		isRedeployReady,
+		setIsRedeployReady,
 		isGenerationPaused,
 		isGenerating,
 		handleStopGeneration,
