@@ -233,19 +233,18 @@ const worker = {
 					headers.delete('X-Frame-Options');
 					headers.delete('Content-Security-Policy');
 
-					// For HTML responses, inject a <base> tag pointing to the subdomain
-					// so Vite assets load directly (the Access cookie authenticates them).
-					// Only the initial iframe HTML load needs the proxy to strip X-Frame-Options.
+					// For HTML responses, inject a <base> tag pointing to the proxy path
+					// so all asset requests also route through the proxy (bypassing Access).
 					const contentType = headers.get('Content-Type') || '';
 					if (contentType.includes('text/html')) {
-						const previewOrigin = `https://${subdomain}.${getPreviewDomain(env)}`;
+						const basePath = `/api/sandbox-preview/${subdomain}/`;
 						let html = await sandboxResponse.text();
 						if (html.includes('<head>')) {
-							html = html.replace('<head>', `<head><base href="${previewOrigin}/">`);
+							html = html.replace('<head>', `<head><base href="${basePath}">`);
 						} else if (html.includes('<head ')) {
-							html = html.replace(/<head([^>]*)>/, `<head$1><base href="${previewOrigin}/">`);
+							html = html.replace(/<head([^>]*)>/, `<head$1><base href="${basePath}">`);
 						} else {
-							html = `<base href="${previewOrigin}/">` + html;
+							html = `<base href="${basePath}">` + html;
 						}
 						headers.delete('Content-Length');
 						return new Response(html, {

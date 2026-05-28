@@ -88,17 +88,17 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 		 * Returns preview type if accessible, 'access-blocked' if auth needed, null otherwise.
 		 */
 		const testAvailability = useCallback(async (url: string): Promise<'sandbox' | 'dispatcher' | 'access-blocked' | null> => {
-			// If we have an Access token, authenticate the subdomain directly.
-			// This sets the CF_Authorization cookie so the iframe can load without proxy.
+			// If we have an Access token, check via the same-origin proxy.
+			// The proxy forwards the token as Authorization header to the sandbox,
+			// bypassing Access entirely (internal DO RPC, not HTTP to subdomain).
 			const token = accessToken || getAccessToken(url);
 			if (token) {
 				try {
-					const response = await fetch(url, {
+					const proxyUrl = toProxyUrl(url, token);
+					const response = await fetch(proxyUrl, {
 						method: 'HEAD',
-						mode: 'cors',
 						cache: 'no-cache',
 						credentials: 'include',
-						headers: { 'Authorization': `Bearer ${token}` },
 						signal: AbortSignal.timeout(8000),
 					});
 					if (response.ok) {
@@ -106,33 +106,17 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 						if (previewType === 'sandbox-error') return null;
 						return (previewType === 'sandbox' || previewType === 'dispatcher') ? previewType : 'sandbox';
 					}
-					// Token might be invalid/expired
 					if (response.status === 401) {
 						const refreshed = await refreshAccessToken(url);
-						if (refreshed) {
-							setAccessToken(refreshed);
-						}
-						return null; // Will retry
-					}
-				} catch {
-					// CORS error -- Access might not accept the token via CORS
-					// Fall back to proxy-based availability check
-					try {
-						const proxyUrl = toProxyUrl(url, token);
-						const proxyRes = await fetch(proxyUrl, {
-							method: 'HEAD',
-							cache: 'no-cache',
-							credentials: 'include',
-							signal: AbortSignal.timeout(8000),
-						});
-						if (proxyRes.ok) return 'sandbox';
-					} catch {
+						if (refreshed) setAccessToken(refreshed);
 						return null;
 					}
+				} catch {
+					return null;
 				}
 			}
 
-			// No token -- try direct access
+			// No token -- try direct access to detect if Access blocks it
 			try {
 				const response = await fetch(url, {
 					method: 'HEAD',
@@ -145,14 +129,9 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 				if (response.redirected && response.url.includes('cloudflareaccess.com')) {
 					return 'access-blocked';
 				}
-
 				if (response.status === 401) {
-					const wwwAuth = response.headers.get('www-authenticate');
-					if (wwwAuth?.includes('resource_metadata')) {
-						return 'access-blocked';
-					}
+					return 'access-blocked';
 				}
-
 				if (!response.ok) return null;
 				
 				const previewType = response.headers.get('X-Preview-Type');
@@ -160,8 +139,8 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 				if (previewType === 'sandbox' || previewType === 'dispatcher') return previewType;
 				return 'sandbox';
 			} catch {
-				// CORS error from Access redirect
-				return token ? null : 'access-blocked';
+				// CORS error from Access redirect means blocked
+				return 'access-blocked';
 			}
 		}, [accessToken]);
 
@@ -306,7 +285,7 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 					loadWithRetry(url, nextAttempt);
 				}, delay);
 			}
-		}, [testAvailability, requestScreenshot, requestRedeploy]);
+		}, [testAvailability, requestScreenshot, requestRedeploy, accessToken]);
 
 		/**
 		 * Force a fresh reload from scratch
