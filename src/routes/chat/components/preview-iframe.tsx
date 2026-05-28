@@ -88,9 +88,6 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 		 * Returns preview type if accessible, 'access-blocked' if auth needed, null otherwise.
 		 */
 		const testAvailability = useCallback(async (url: string): Promise<'sandbox' | 'dispatcher' | 'access-blocked' | null> => {
-			// Always try direct access first. After OAuth popup authentication,
-			// Access sets the CF_Authorization cookie for the preview domain,
-			// so subsequent requests should pass through.
 			try {
 				const response = await fetch(url, {
 					method: 'HEAD',
@@ -100,11 +97,10 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 					signal: AbortSignal.timeout(8000),
 				});
 
-				// Detect Access blocking (redirect or 401)
 				if (response.redirected && response.url.includes('cloudflareaccess.com')) {
 					return 'access-blocked';
 				}
-				if (response.status === 401) {
+				if (response.status === 401 || response.status === 403) {
 					return 'access-blocked';
 				}
 				if (!response.ok) return null;
@@ -114,7 +110,7 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 				if (previewType === 'sandbox' || previewType === 'dispatcher') return previewType;
 				return 'sandbox';
 			} catch {
-				// CORS error from Access redirect means blocked
+				// CORS error from Access redirect = not authenticated
 				return 'access-blocked';
 			}
 		}, []);
@@ -218,8 +214,6 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 			}
 
 			if (previewType) {
-				// After OAuth authentication, the CF_Authorization cookie is set
-				// for the preview domain. Load iframe directly from subdomain.
 				console.log(`Preview available (${previewType}) at attempt ${attempt + 1}`);
 				setLoadState({
 					status: 'postload',

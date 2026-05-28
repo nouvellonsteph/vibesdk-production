@@ -29,6 +29,7 @@ function setOriginControl(env: Env, request: Request, currentHeaders: Headers): 
     
     if (origin && isOriginAllowed(env, origin)) {
         currentHeaders.set('Access-Control-Allow-Origin', origin);
+        currentHeaders.set('Access-Control-Allow-Credentials', 'true');
     }
     return currentHeaders;
 }
@@ -272,6 +273,22 @@ const worker = {
 
 		// Route 2: User App Request (e.g., xyz.build.cloudflare.dev or test.localhost)
 		if (isSubdomainRequest) {
+			// Handle CORS preflight for preview subdomains (Access bypasses OPTIONS to origin)
+			if (request.method === 'OPTIONS') {
+				const origin = request.headers.get('Origin');
+				if (origin && isOriginAllowed(env, origin)) {
+					return new Response(null, {
+						status: 204,
+						headers: {
+							'Access-Control-Allow-Origin': origin,
+							'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+							'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+							'Access-Control-Allow-Credentials': 'true',
+							'Access-Control-Max-Age': '86400',
+						},
+					});
+				}
+			}
 			return handleUserAppRequest(request, env);
 		}
 
