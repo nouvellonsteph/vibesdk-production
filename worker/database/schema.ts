@@ -616,6 +616,68 @@ export const userModelProviders = sqliteTable('user_model_providers', {
 }));
 
 // ========================================
+// EGRESS CONTROL
+// ========================================
+
+/**
+ * Egress rules table - Admin-configured allowlist/denylist for outbound traffic
+ * Controls which external hosts sandboxes and deployed apps can reach.
+ */
+export const egressRules = sqliteTable('egress_rules', {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    description: text('description'),
+
+    // Rule configuration
+    ruleType: text('rule_type', { enum: ['allow', 'deny'] }).notNull().default('allow'),
+    scope: text('scope', { enum: ['global', 'tier', 'app'] }).notNull().default('global'),
+    scopeId: text('scope_id'), // tier ID or app ID when scope != 'global'
+    hostPattern: text('host_pattern').notNull(), // hostname or glob (e.g., '*.google.com')
+
+    // Audit
+    createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+    scopeIdx: index('egress_rules_scope_idx').on(table.scope, table.scopeId),
+    typeIdx: index('egress_rules_type_idx').on(table.ruleType),
+}));
+
+// ========================================
+// USER INTEGRATIONS
+// ========================================
+
+/**
+ * User integrations table - Connected external services (Google Drive, etc.)
+ * Stores encrypted OAuth tokens for per-user service access.
+ */
+export const userIntegrations = sqliteTable('user_integrations', {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull(), // 'google_drive'
+
+    // Encrypted OAuth tokens
+    accessTokenEncrypted: text('access_token_encrypted'),
+    refreshTokenEncrypted: text('refresh_token_encrypted'),
+    tokenExpiresAt: integer('token_expires_at', { mode: 'timestamp' }),
+
+    // Granted scopes
+    scopes: text('scopes', { mode: 'json' }),
+
+    // Status
+    isActive: integer('is_active', { mode: 'boolean' }).default(true),
+    lastSyncedAt: integer('last_synced_at', { mode: 'timestamp' }),
+
+    // Metadata
+    createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+    userProviderIdx: uniqueIndex('user_integrations_user_provider_idx').on(table.userId, table.provider),
+    userIdx: index('user_integrations_user_idx').on(table.userId),
+    providerIdx: index('user_integrations_provider_idx').on(table.provider),
+}));
+
+// ========================================
 // SYSTEM CONFIGURATION
 // ========================================
 
@@ -697,3 +759,9 @@ export type NewTier = typeof tiers.$inferInsert;
 
 export type TierOverride = typeof tierOverrides.$inferSelect;
 export type NewTierOverride = typeof tierOverrides.$inferInsert;
+
+export type EgressRule = typeof egressRules.$inferSelect;
+export type NewEgressRule = typeof egressRules.$inferInsert;
+
+export type UserIntegration = typeof userIntegrations.$inferSelect;
+export type NewUserIntegration = typeof userIntegrations.$inferInsert;
