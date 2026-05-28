@@ -233,6 +233,28 @@ const worker = {
 					headers.delete('X-Frame-Options');
 					headers.delete('Content-Security-Policy');
 
+					// For HTML responses, inject a <base> tag pointing to the subdomain
+					// so Vite assets load directly (the Access cookie authenticates them).
+					// Only the initial iframe HTML load needs the proxy to strip X-Frame-Options.
+					const contentType = headers.get('Content-Type') || '';
+					if (contentType.includes('text/html')) {
+						const previewOrigin = `https://${subdomain}.${getPreviewDomain(env)}`;
+						let html = await sandboxResponse.text();
+						if (html.includes('<head>')) {
+							html = html.replace('<head>', `<head><base href="${previewOrigin}/">`);
+						} else if (html.includes('<head ')) {
+							html = html.replace(/<head([^>]*)>/, `<head$1><base href="${previewOrigin}/">`);
+						} else {
+							html = `<base href="${previewOrigin}/">` + html;
+						}
+						headers.delete('Content-Length');
+						return new Response(html, {
+							status: sandboxResponse.status,
+							statusText: sandboxResponse.statusText,
+							headers,
+						});
+					}
+
 					return new Response(sandboxResponse.body, {
 						status: sandboxResponse.status,
 						statusText: sandboxResponse.statusText,

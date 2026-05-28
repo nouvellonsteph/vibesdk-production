@@ -264,14 +264,17 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 			}
 
 			if (previewType) {
-				// Load the iframe directly from the subdomain.
-				// If authenticated via OAuth, the CF_Authorization cookie is set
-				// on the subdomain from the HEAD request, so the iframe can load directly.
-				console.log(`Preview available (${previewType}) at attempt ${attempt + 1}`);
+				// If authenticated via OAuth, load through the proxy to strip X-Frame-Options.
+				// The proxy injects a <base> tag pointing to the subdomain, so Vite assets
+				// load directly from the subdomain (authenticated via CF_Authorization cookie).
+				const token = accessToken || getAccessToken(url);
+				const iframeSrc = token ? toProxyUrl(url, token) : url;
+
+				console.log(`Preview available (${previewType}) at attempt ${attempt + 1}, via ${token ? 'proxy' : 'direct'}`);
 				setLoadState({
 					status: 'postload',
 					attempt: attempt + 1,
-					loadedSrc: url,
+					loadedSrc: iframeSrc,
 					errorMessage: null,
 					previewType,
 				});
