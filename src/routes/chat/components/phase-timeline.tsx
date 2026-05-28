@@ -186,6 +186,7 @@ interface PhaseTimelineProps {
 	// Deployment functionality
 	chatId?: string;
 	isDeploying?: boolean;
+	isAlreadyDeployed?: boolean;
 	handleDeployToCloudflare?: (instanceId: string) => void;
 	// Issue tracking and debugging
 	runtimeErrorCount?: number;
@@ -275,6 +276,7 @@ export function PhaseTimeline({
 	onViewChange,
 	chatId,
 	isDeploying,
+	isAlreadyDeployed,
 	handleDeployToCloudflare,
 	runtimeErrorCount = 0,
 	staticIssueCount = 0,
@@ -537,15 +539,15 @@ export function PhaseTimeline({
                                         }}
                                         disabled={!!isDeploying}
                                         className="ml-2 flex items-center gap-1.5 px-2.5 py-1 bg-accent hover:bg-accent/90 disabled:bg-accent/50 text-white rounded-full text-xs font-medium transition-colors disabled:cursor-not-allowed"
-                                        title={isDeploying ? 'Deploying...' : 'Deploy to Cloudflare'}
-                                        aria-label={isDeploying ? 'Deploying' : 'Deploy to Cloudflare'}
+                                        title={isDeploying ? 'Deploying...' : isAlreadyDeployed ? 'Redeploy to Cloudflare' : 'Deploy to Cloudflare'}
+                                        aria-label={isDeploying ? 'Deploying' : isAlreadyDeployed ? 'Redeploy' : 'Deploy'}
                                     >
                                         {isDeploying ? (
                                             <StatusLoader size="sm" color="accent" />
                                         ) : (
                                             <Zap className="w-3 h-3" />
                                         )}
-                                        <span className="hidden sm:inline">{isDeploying ? 'Deploying...' : 'Deploy'}</span>
+                                        <span className="hidden sm:inline">{isDeploying ? 'Deploying...' : isAlreadyDeployed ? 'Redeploy' : 'Deploy'}</span>
                                     </button>
                                 )}
                             </motion.div>
@@ -633,7 +635,7 @@ export function PhaseTimeline({
 														) : (
 															<Zap className="w-3 h-3" />
 														)}
-														{isDeploying ? 'Deploying...' : 'Deploy to Cloudflare'}
+														{isDeploying ? 'Deploying...' : isAlreadyDeployed ? 'Redeploy' : 'Deploy to Cloudflare'}
 													</button>
 												)}
 											</div>
