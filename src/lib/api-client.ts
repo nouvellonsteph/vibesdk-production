@@ -71,6 +71,11 @@ import type{
 	CreateTierRequest,
 	UpdateTierRequest,
 	SetUserOverridesRequest,
+	EgressRulesListData,
+	EgressRuleData,
+	EgressRuleDeleteData,
+	CreateEgressRuleRequest,
+	UpdateEgressRuleRequest,
 } from '@/api-types';
 import {
 	RateLimitExceededError,
@@ -1392,6 +1397,34 @@ class ApiClient {
 	/** Get admin dashboard stats */
 	async adminGetStats(): Promise<ApiResponse<AdminStatsData>> {
 		return this.request<AdminStatsData>('/api/admin/stats');
+	}
+
+	/** List all egress rules */
+	async adminListEgressRules(): Promise<ApiResponse<EgressRulesListData>> {
+		return this.request<EgressRulesListData>('/api/admin/egress-rules');
+	}
+
+	/** Create an egress rule */
+	async adminCreateEgressRule(data: CreateEgressRuleRequest): Promise<ApiResponse<EgressRuleData>> {
+		return this.request<EgressRuleData>('/api/admin/egress-rules', {
+			method: 'POST',
+			body: data,
+		});
+	}
+
+	/** Update an egress rule */
+	async adminUpdateEgressRule(ruleId: string, data: UpdateEgressRuleRequest): Promise<ApiResponse<EgressRuleData>> {
+		return this.request<EgressRuleData>(`/api/admin/egress-rules/${ruleId}`, {
+			method: 'PUT',
+			body: data,
+		});
+	}
+
+	/** Delete an egress rule */
+	async adminDeleteEgressRule(ruleId: string): Promise<ApiResponse<EgressRuleDeleteData>> {
+		return this.request<EgressRuleDeleteData>(`/api/admin/egress-rules/${ruleId}`, {
+			method: 'DELETE',
+		});
 	}
 }
 

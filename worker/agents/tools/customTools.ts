@@ -23,6 +23,7 @@ import { ICodingAgent } from '../services/interfaces/ICodingAgent';
 import { Message } from '../inferutils/common';
 import { ChatCompletionMessageFunctionToolCall } from 'openai/resources';
 import { DeepDebuggerSession } from '../operations/DeepDebugger';
+import { createGoogleDriveSearchTool, createGoogleDriveReadTool } from './toolkit/google-drive';
 
 export async function executeToolWithDefinition<TArgs, TResult>(
     toolCall: ChatCompletionMessageFunctionToolCall,
@@ -44,8 +45,9 @@ export function buildTools(
     logger: StructuredLogger,
     toolRenderer: RenderToolCall,
     streamCb: (chunk: string) => void,
+    options?: { driveAccessToken?: string },
 ): ToolDefinition<any, any>[] {
-    return [
+    const tools: ToolDefinition<any, any>[] = [
         toolWebSearchDefinition,
         toolFeedbackDefinition,
         createQueueRequestTool(agent, logger),
@@ -60,6 +62,17 @@ export function buildTools(
         // Deep autonomous debugging assistant tool
         createDeepDebuggerTool(agent, logger, toolRenderer, streamCb),
     ];
+
+    // Conditionally add Google Drive tools when the user has connected Drive
+    if (options?.driveAccessToken) {
+        tools.push(
+            createGoogleDriveSearchTool(options.driveAccessToken, logger),
+            createGoogleDriveReadTool(options.driveAccessToken, logger),
+        );
+        logger.info('Google Drive tools registered for this session');
+    }
+
+    return tools;
 }
 
 export function buildDebugTools(session: DeepDebuggerSession, logger: StructuredLogger, toolRenderer?: RenderToolCall): ToolDefinition<any, any>[] {

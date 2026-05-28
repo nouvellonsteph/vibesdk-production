@@ -327,6 +327,14 @@ export type {
     SetUserOverridesRequest,
 } from 'worker/api/controllers/admin/types';
 
+export type {
+    EgressRulesListData,
+    EgressRuleData,
+    EgressRuleDeleteData,
+    CreateEgressRuleRequest,
+    UpdateEgressRuleRequest,
+} from 'worker/api/controllers/admin/egress-types';
+
 // Tier types
-export type { Tier, TierOverride } from 'worker/database/schema';
+export type { Tier, TierOverride, EgressRule } from 'worker/database/schema';
 export type { TierFeatures, EffectiveLimits } from 'worker/database/services/TierService';
