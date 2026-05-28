@@ -1,0 +1,9 @@
+{
+	"$schema": "https://opencode.ai/config.json",
+	"mcp": {
+		"justalittlebyte": {
+			"type": "remote",
+			"url": "https://mcp.justalittlebyte.ovh/mcp"
+		}
+	}
+}
