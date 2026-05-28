@@ -18,6 +18,9 @@ import AdminUsers from './pages/admin/admin-users';
 import AdminUserDetail from './pages/admin/admin-user-detail';
 import AdminTiers from './pages/admin/admin-tiers';
 
+// OAuth callback
+import AccessOAuthCallback from './pages/access-oauth-callback';
+
 const routes = [
 	{
 		path: '/',
@@ -74,6 +77,10 @@ const routes = [
 				],
 			},
 		],
+	},
+	{
+		path: '/access-oauth-callback',
+		Component: AccessOAuthCallback,
 	},
 ] satisfies RouteObject[];
 

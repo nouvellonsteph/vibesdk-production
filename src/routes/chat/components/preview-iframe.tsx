@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, forwardRef, useCallback } from 'react';
-import { RefreshCw, AlertCircle } from 'lucide-react';
+import { RefreshCw, AlertCircle, Shield } from 'lucide-react';
 import { WebSocket } from 'partysocket';
+import { getAccessToken, refreshAccessToken, authenticatePreview } from '@/lib/access-oauth';
 
 interface PreviewIframeProps {
     src: string;
@@ -17,19 +18,19 @@ interface PreviewIframeProps {
 
 /**
  * Convert a preview subdomain URL into a same-origin proxy path.
- * This avoids Cloudflare Access blocking the cross-origin iframe load.
- * e.g. https://8001-sessionId-token.vibesdk.example.com/path
- *   -> /api/sandbox-preview/8001-sessionId-token/path
+ * Bypasses Cloudflare Access by routing through the main domain's Worker.
+ * The Access OAuth token is passed as a query param so the Worker can
+ * forward it as an Authorization header to the container.
  */
-function toProxyUrl(previewUrl: string): string {
+function toProxyUrl(previewUrl: string, accessToken?: string): string {
 	try {
 		const url = new URL(previewUrl);
 		const hostname = url.hostname;
-		// Extract the subdomain (everything before the first dot)
 		const firstDot = hostname.indexOf('.');
-		if (firstDot === -1) return previewUrl; // not a subdomain URL
+		if (firstDot === -1) return previewUrl;
 		const subdomain = hostname.substring(0, firstDot);
-		return `/api/sandbox-preview/${subdomain}${url.pathname}${url.search}`;
+		const tokenParam = accessToken ? `${url.search ? '&' : '?'}cf_access_token=${encodeURIComponent(accessToken)}` : '';
+		return `/api/sandbox-preview/${subdomain}${url.pathname}${url.search}${tokenParam}`;
 	} catch {
 		return previewUrl;
 	}
@@ -40,7 +41,7 @@ function toProxyUrl(previewUrl: string): string {
 // ============================================================================
 
 interface LoadState {
-    status: 'idle' | 'loading' | 'postload' | 'loaded' | 'error';
+    status: 'idle' | 'loading' | 'postload' | 'loaded' | 'error' | 'access-blocked';
     attempt: number;
     loadedSrc: string | null;
     errorMessage: string | null;
@@ -74,50 +75,88 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 		const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 		const hasRequestedRedeployRef = useRef(false);
         const postLoadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+		const [accessToken, setAccessToken] = useState<string | null>(null);
+		const [isAuthenticating, setIsAuthenticating] = useState(false);
+
 		// ====================================================================
 		// Core Loading Logic
 		// ====================================================================
 
 		/**
-		 * Test if URL is accessible using a simple HEAD request
-		 * Returns preview type if accessible, null otherwise
+		 * Test if URL is accessible. First tries direct access, then
+		 * falls back to the same-origin proxy with Access OAuth token.
+		 * Returns preview type if accessible, 'access-blocked' if auth needed, null otherwise.
 		 */
-		const testAvailability = useCallback(async (url: string): Promise<'sandbox' | 'dispatcher' | null> => {
+		const testAvailability = useCallback(async (url: string): Promise<'sandbox' | 'dispatcher' | 'access-blocked' | null> => {
+			// If we have an Access token, test via the proxy
+			const token = accessToken || getAccessToken(url);
+			if (token) {
+				try {
+					const proxyUrl = toProxyUrl(url, token);
+					const response = await fetch(proxyUrl, {
+						method: 'HEAD',
+						cache: 'no-cache',
+						credentials: 'include',
+						signal: AbortSignal.timeout(8000),
+					});
+					if (response.ok) {
+						const previewType = response.headers.get('X-Preview-Type');
+						if (previewType === 'sandbox-error') return null;
+						return (previewType === 'sandbox' || previewType === 'dispatcher') ? previewType : 'sandbox';
+					}
+				} catch {
+					// Token may be expired, try refresh
+					const refreshed = await refreshAccessToken(url);
+					if (refreshed) {
+						setAccessToken(refreshed);
+						return null; // Will retry on next attempt with new token
+					}
+				}
+			}
+
+			// Try direct access
 			try {
 				const response = await fetch(url, {
 					method: 'HEAD',
-					mode: 'cors', // Using CORS to read security-validated headers
+					mode: 'cors',
 					cache: 'no-cache',
+					credentials: 'include',
 					signal: AbortSignal.timeout(8000),
 				});
-                console.log('Preview availability test response:', response, response.headers.forEach((value, key) => console.log("Header: ",key, value)));
-				
+
+				// Detect Access redirect (302 to cloudflareaccess.com)
+				if (response.redirected && response.url.includes('cloudflareaccess.com')) {
+					console.log('Preview blocked by Cloudflare Access');
+					return 'access-blocked';
+				}
+
+				if (response.status === 401) {
+					const wwwAuth = response.headers.get('www-authenticate');
+					if (wwwAuth?.includes('resource_metadata')) {
+						console.log('Preview requires Access OAuth authentication');
+						return 'access-blocked';
+					}
+				}
+
 				if (!response.ok) {
 					console.log('Preview not ready (status:', response.status, ')');
 					return null;
 				}
 				
-				// Read the custom header to determine preview type
-				// Header will only be present if origin validation passed on server
 				const previewType = response.headers.get('X-Preview-Type');
-				
-                if (previewType === 'sandbox-error') {
-                    console.log('Preview not ready (sandbox error)');
-                    return null;
-                } else if (previewType === 'sandbox' || previewType === 'dispatcher') {
-					console.log('Preview available, type:', previewType);
-					return previewType;
-				}
-				
-				// Fallback: If no header present (shouldn't happen with valid origin)
-				// but the response is OK, assume sandbox for backward compatibility
-				console.log('Preview available (type unknown, assuming sandbox)');
+				if (previewType === 'sandbox-error') return null;
+				if (previewType === 'sandbox' || previewType === 'dispatcher') return previewType;
 				return 'sandbox';
 			} catch (error) {
+				// CORS error from Access redirect also lands here
 				console.log('Preview not available yet:', error);
+				// Check if this might be Access-blocked (CORS errors from redirects)
+				if (error instanceof TypeError && !token) {
+					return 'access-blocked';
+				}
 				return null;
 			}
-		}, []);
+		}, [accessToken]);
 
 		/**
 		 * Request automatic redeployment via WebSocket
@@ -206,13 +245,28 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 			// Test availability
 			const previewType = await testAvailability(url);
 
+			// Access is blocking -- show auth prompt instead of retrying
+			if (previewType === 'access-blocked') {
+				setLoadState({
+					status: 'access-blocked',
+					attempt: attempt + 1,
+					loadedSrc: null,
+					errorMessage: 'Preview requires authentication',
+				});
+				return;
+			}
+
 			if (previewType) {
-				// Success: put component into postload state, keep loading UI visible
+				// Success: determine the right URL for the iframe.
+				// If we have an Access token, use the proxy to bypass Access.
+				const token = accessToken || getAccessToken(url);
+				const iframeSrc = token ? toProxyUrl(url, token) : url;
+
 				console.log(`Preview available (${previewType}) at attempt ${attempt + 1}`);
 				setLoadState({
 					status: 'postload',
 					attempt: attempt + 1,
-					loadedSrc: url,
+					loadedSrc: iframeSrc,
 					errorMessage: null,
 					previewType,
 				});
@@ -375,6 +429,52 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 						}));
 					}}
 				/>
+			);
+		}
+
+		// Access authentication required
+		if (loadState.status === 'access-blocked') {
+			const handleAuthenticate = async () => {
+				setIsAuthenticating(true);
+				try {
+					const token = await authenticatePreview(src);
+					setAccessToken(token);
+					// Retry loading with the new token
+					forceReload();
+				} catch (error) {
+					console.error('Access OAuth authentication failed:', error);
+					setLoadState(prev => ({
+						...prev,
+						errorMessage: `Authentication failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+					}));
+				} finally {
+					setIsAuthenticating(false);
+				}
+			};
+
+			return (
+				<div className={`${className} flex flex-col items-center justify-center bg-bg-3 border border-text/10 rounded-lg`}>
+					<div className="text-center p-8 max-w-md">
+						<Shield className="size-8 text-accent mx-auto mb-4" />
+						<h3 className="text-lg font-medium text-text-primary mb-2">
+							Preview Authentication Required
+						</h3>
+						<p className="text-text-primary/70 text-sm mb-6">
+							This preview is protected by Cloudflare Access. Sign in to view it.
+						</p>
+						{loadState.errorMessage && loadState.errorMessage !== 'Preview requires authentication' && (
+							<p className="text-red-400 text-xs mb-4">{loadState.errorMessage}</p>
+						)}
+						<button
+							onClick={handleAuthenticate}
+							disabled={isAuthenticating}
+							className="flex items-center justify-center gap-2 px-6 py-3 bg-accent hover:bg-accent/90 text-white rounded-lg transition-colors text-sm mx-auto font-medium w-full disabled:opacity-50"
+						>
+							<Shield className="size-4" />
+							{isAuthenticating ? 'Authenticating...' : 'Sign in to View Preview'}
+						</button>
+					</div>
+				</div>
 			);
 		}
 

@@ -207,14 +207,21 @@ const worker = {
 					return new Response('Missing preview subdomain', { status: 400 });
 				}
 
-				// Build a fake request with the subdomain hostname so proxyToSandbox can parse it
+				// Build a fake request with the subdomain hostname so proxyToSandbox can parse it.
+				// Forward any Authorization header (Access OAuth token) from the client.
 				const previewDomain = getPreviewDomain(env);
 				const fakeUrl = new URL(request.url);
 				fakeUrl.hostname = `${subdomain}.${previewDomain}`;
 				fakeUrl.pathname = resourcePath;
+				const fakeHeaders = new Headers(request.headers);
+				// Pass through the Access token from query param if present (for iframe src)
+				const accessToken = url.searchParams.get('cf_access_token');
+				if (accessToken) {
+					fakeHeaders.set('Authorization', `Bearer ${accessToken}`);
+				}
 				const fakeRequest = new Request(fakeUrl.toString(), {
 					method: request.method,
-					headers: request.headers,
+					headers: fakeHeaders,
 					body: request.body,
 					// @ts-expect-error - duplex needed for body streaming
 					duplex: 'half',
