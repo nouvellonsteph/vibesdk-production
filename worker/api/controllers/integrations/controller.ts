@@ -87,7 +87,7 @@ export class IntegrationController extends BaseController {
 				{ expirationTtl: 600 }
 			);
 
-			const authUrl = buildDriveAuthUrl(env, redirectUri, state);
+			const authUrl = await buildDriveAuthUrl(env, redirectUri, state);
 
 			return IntegrationController.createSuccessResponse<IntegrationConnectData>({ authUrl });
 		} catch (error) {

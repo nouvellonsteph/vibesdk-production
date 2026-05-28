@@ -18,6 +18,7 @@ import AdminUsers from './pages/admin/admin-users';
 import AdminUserDetail from './pages/admin/admin-user-detail';
 import AdminTiers from './pages/admin/admin-tiers';
 import AdminEgress from './pages/admin/admin-egress';
+import AdminIntegrations from './pages/admin/admin-integrations';
 
 // OAuth callback
 import AccessOAuthCallback from './pages/access-oauth-callback';
@@ -78,6 +79,10 @@ const routes = [
 					{
 						path: 'egress',
 						Component: AdminEgress,
+					},
+					{
+						path: 'integrations',
+						Component: AdminIntegrations,
 					},
 				],
 			},

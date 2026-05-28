@@ -1,13 +1,14 @@
 import { Outlet, NavLink, Navigate } from 'react-router';
 import { useAuth } from '@/contexts/auth-context';
 import { Skeleton } from '@/components/ui/skeleton';
-import { LayoutDashboard, Users, Layers, ShieldCheck } from 'lucide-react';
+import { LayoutDashboard, Users, Layers, ShieldCheck, Plug } from 'lucide-react';
 
 const NAV_ITEMS = [
 	{ to: '/admin', label: 'Dashboard', icon: LayoutDashboard, end: true },
 	{ to: '/admin/users', label: 'Users', icon: Users, end: false },
 	{ to: '/admin/tiers', label: 'Tiers', icon: Layers, end: false },
 	{ to: '/admin/egress', label: 'Egress Rules', icon: ShieldCheck, end: false },
+	{ to: '/admin/integrations', label: 'Integrations', icon: Plug, end: false },
 ] as const;
 
 export default function AdminLayout() {

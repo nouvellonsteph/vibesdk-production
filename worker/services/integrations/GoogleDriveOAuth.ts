@@ -6,11 +6,55 @@
 
 import { createLogger } from '../../logger';
 import { encryptTokens, decryptTokens, type EncryptedTokenData } from '../../utils/tokenEncryption';
+import { createDatabaseService } from '../../database/database';
+import * as schema from '../../database/schema';
+import { eq } from 'drizzle-orm';
 
 const logger = createLogger('GoogleDriveOAuth');
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+
+interface DriveOAuthCredentials {
+	clientId: string;
+	clientSecret: string;
+	enabled: boolean;
+}
+
+/**
+ * Load Google Drive OAuth credentials from system settings (D1).
+ * Falls back to env vars for backward compatibility.
+ */
+async function getDriveCredentials(env: Env): Promise<DriveOAuthCredentials> {
+	try {
+		const db = createDatabaseService(env);
+		const settings = await db.db
+			.select()
+			.from(schema.systemSettings)
+			.where(eq(schema.systemSettings.key, 'integration_config'))
+			.get();
+
+		const config = settings?.value as Record<string, unknown> | undefined;
+		const drive = config?.googleDrive as Record<string, unknown> | undefined;
+
+		if (drive?.clientId && drive?.clientSecret) {
+			return {
+				clientId: drive.clientId as string,
+				clientSecret: drive.clientSecret as string,
+				enabled: drive.enabled === true,
+			};
+		}
+	} catch {
+		// Fall through to env vars
+	}
+
+	// Fallback to env vars
+	return {
+		clientId: env.GOOGLE_CLIENT_ID || '',
+		clientSecret: env.GOOGLE_CLIENT_SECRET || '',
+		enabled: true,
+	};
+}
 
 /** Scopes for Google Drive read access */
 const DRIVE_SCOPES = [
@@ -28,17 +72,26 @@ export interface DriveTokens {
 
 /**
  * Build the OAuth authorization URL for Google Drive consent.
+ * Reads credentials from admin-configured system settings.
  */
-export function buildDriveAuthUrl(env: Env, redirectUri: string, state: string): string {
+export async function buildDriveAuthUrl(env: Env, redirectUri: string, state: string): Promise<string> {
+	const creds = await getDriveCredentials(env);
+	if (!creds.enabled) {
+		throw new Error('Google Drive integration is not enabled by the administrator');
+	}
+	if (!creds.clientId) {
+		throw new Error('Google Drive OAuth client ID is not configured. Contact your administrator.');
+	}
+
 	const params = new URLSearchParams({
-		client_id: env.GOOGLE_CLIENT_ID,
+		client_id: creds.clientId,
 		redirect_uri: redirectUri,
 		response_type: 'code',
 		scope: DRIVE_SCOPES.join(' '),
-		access_type: 'offline', // request refresh token
-		prompt: 'consent', // always show consent screen for Drive scopes
+		access_type: 'offline',
+		prompt: 'consent',
 		state,
-		include_granted_scopes: 'true', // incremental authorization
+		include_granted_scopes: 'true',
 	});
 
 	return `${GOOGLE_AUTH_URL}?${params}`;
@@ -52,13 +105,14 @@ export async function exchangeCodeForDriveTokens(
 	code: string,
 	redirectUri: string
 ): Promise<DriveTokens> {
+	const creds = await getDriveCredentials(env);
 	const response = await fetch(GOOGLE_TOKEN_URL, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
 		body: new URLSearchParams({
 			code,
-			client_id: env.GOOGLE_CLIENT_ID,
-			client_secret: env.GOOGLE_CLIENT_SECRET,
+			client_id: creds.clientId,
+			client_secret: creds.clientSecret,
 			redirect_uri: redirectUri,
 			grant_type: 'authorization_code',
 		}),
@@ -94,13 +148,14 @@ export async function refreshDriveAccessToken(
 	env: Env,
 	refreshToken: string
 ): Promise<{ accessToken: string; expiresIn: number }> {
+	const creds = await getDriveCredentials(env);
 	const response = await fetch(GOOGLE_TOKEN_URL, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
 		body: new URLSearchParams({
 			refresh_token: refreshToken,
-			client_id: env.GOOGLE_CLIENT_ID,
-			client_secret: env.GOOGLE_CLIENT_SECRET,
+			client_id: creds.clientId,
+			client_secret: creds.clientSecret,
 			grant_type: 'refresh_token',
 		}),
 		signal: AbortSignal.timeout(10000),

@@ -1399,6 +1399,21 @@ class ApiClient {
 		return this.request<AdminStatsData>('/api/admin/stats');
 	}
 
+	/** Get integration configuration (OAuth credentials, enabled state) */
+	async adminGetIntegrationConfig(): Promise<ApiResponse<{ config: { googleDrive: { clientId: string; clientSecret: string; hasSecret: boolean; enabled: boolean } } }>> {
+		return this.request('/api/admin/integrations/config');
+	}
+
+	/** Update integration configuration */
+	async adminUpdateIntegrationConfig(data: {
+		googleDrive?: { clientId?: string; clientSecret?: string; enabled?: boolean };
+	}): Promise<ApiResponse<{ success: boolean }>> {
+		return this.request('/api/admin/integrations/config', {
+			method: 'PUT',
+			body: data,
+		});
+	}
+
 	// ===============================
 	// Integration API Methods
 	// ===============================

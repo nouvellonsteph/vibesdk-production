@@ -36,4 +36,8 @@ export function setupAdminRoutes(app: Hono<AppEnv>): void {
 	app.post('/api/admin/egress-rules', adminAuth, adaptController(AdminController, AdminController.createEgressRule));
 	app.put('/api/admin/egress-rules/:ruleId', adminAuth, adaptController(AdminController, AdminController.updateEgressRule));
 	app.delete('/api/admin/egress-rules/:ruleId', adminAuth, adaptController(AdminController, AdminController.deleteEgressRule));
+
+	// ---- Integration configuration ----
+	app.get('/api/admin/integrations/config', adminAuth, adaptController(AdminController, AdminController.getIntegrationConfig));
+	app.put('/api/admin/integrations/config', adminAuth, adaptController(AdminController, AdminController.updateIntegrationConfig));
 }

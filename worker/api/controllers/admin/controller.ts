@@ -569,4 +569,118 @@ export class AdminController extends BaseController {
 			return AdminController.handleError(error, 'delete egress rule') as ControllerResponse<ApiResponse<EgressRuleDeleteData>>;
 		}
 	}
+
+	// ========================================
+	// INTEGRATION CONFIGURATION
+	// ========================================
+
+	/**
+	 * GET /api/admin/integrations/config -- get integration settings
+	 */
+	static async getIntegrationConfig(
+		_request: Request,
+		env: Env,
+		_ctx: ExecutionContext,
+		_context: RouteContext
+	): Promise<Response> {
+		try {
+			const db = createDatabaseService(env);
+			const settings = await db.db
+				.select()
+				.from(schema.systemSettings)
+				.where(eq(schema.systemSettings.key, 'integration_config'))
+				.get();
+
+			const config = settings?.value ?? {
+				googleDrive: { clientId: '', clientSecret: '', enabled: false },
+			};
+
+			// Mask the secret for display
+			const masked = JSON.parse(JSON.stringify(config));
+			if (masked.googleDrive?.clientSecret) {
+				const secret = masked.googleDrive.clientSecret;
+				masked.googleDrive.clientSecret = secret.length > 8
+					? secret.substring(0, 4) + '****' + secret.substring(secret.length - 4)
+					: '****';
+				masked.googleDrive.hasSecret = true;
+			} else {
+				masked.googleDrive = masked.googleDrive || {};
+				masked.googleDrive.hasSecret = false;
+			}
+
+			return AdminController.createSuccessResponse({ config: masked });
+		} catch (error) {
+			return AdminController.handleError(error, 'get integration config');
+		}
+	}
+
+	/**
+	 * PUT /api/admin/integrations/config -- update integration settings
+	 */
+	static async updateIntegrationConfig(
+		request: Request,
+		env: Env,
+		_ctx: ExecutionContext,
+		context: RouteContext
+	): Promise<Response> {
+		try {
+			const body = await request.json() as {
+				googleDrive?: {
+					clientId?: string;
+					clientSecret?: string;
+					enabled?: boolean;
+				};
+			};
+
+			const db = createDatabaseService(env);
+
+			// Load existing config
+			const existing = await db.db
+				.select()
+				.from(schema.systemSettings)
+				.where(eq(schema.systemSettings.key, 'integration_config'))
+				.get();
+
+			const currentConfig = (existing?.value ?? {}) as Record<string, unknown>;
+			const currentDrive = (currentConfig.googleDrive ?? {}) as Record<string, unknown>;
+
+			// Merge updates (don't overwrite secret if not provided)
+			const updatedDrive: Record<string, unknown> = { ...currentDrive };
+			if (body.googleDrive?.clientId !== undefined) {
+				updatedDrive.clientId = body.googleDrive.clientId;
+			}
+			if (body.googleDrive?.clientSecret !== undefined && body.googleDrive.clientSecret !== '') {
+				updatedDrive.clientSecret = body.googleDrive.clientSecret;
+			}
+			if (body.googleDrive?.enabled !== undefined) {
+				updatedDrive.enabled = body.googleDrive.enabled;
+			}
+
+			const newConfig = { ...currentConfig, googleDrive: updatedDrive };
+
+			if (existing) {
+				await db.db
+					.update(schema.systemSettings)
+					.set({
+						value: newConfig,
+						updatedAt: new Date(),
+						updatedBy: context.user?.id ?? null,
+					})
+					.where(eq(schema.systemSettings.key, 'integration_config'));
+			} else {
+				await db.db.insert(schema.systemSettings).values({
+					id: 'integration_config',
+					key: 'integration_config',
+					value: newConfig,
+					description: 'OAuth credentials and settings for external integrations',
+					updatedAt: new Date(),
+					updatedBy: context.user?.id ?? null,
+				});
+			}
+
+			return AdminController.createSuccessResponse({ success: true });
+		} catch (error) {
+			return AdminController.handleError(error, 'update integration config');
+		}
+	}
 }
