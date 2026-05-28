@@ -368,9 +368,9 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 			const handleAuthenticate = async () => {
 				setIsAuthenticating(true);
 				try {
-					const token = await authenticatePreview(src);
-					setAccessToken(token);
-					// Retry loading with the new token
+					await authenticatePreview(src);
+					// Token stored in sessionStorage by authenticatePreview.
+					// Retry loading -- the Access cookie should now be set.
 					forceReload();
 				} catch (error) {
 					console.error('Access OAuth authentication failed:', error);
