@@ -5,7 +5,6 @@
  */
 
 import { createLogger } from '../../logger';
-import { encryptTokens, decryptTokens, type EncryptedTokenData } from '../../utils/tokenEncryption';
 import { createDatabaseService } from '../../database/database';
 import * as schema from '../../database/schema';
 import { eq } from 'drizzle-orm';
@@ -217,6 +216,46 @@ export async function refreshDriveAccessToken(
 }
 
 /**
+ * Derive an AES-GCM key from the ENTROPY_KEY env var for Drive token encryption.
+ */
+async function getDriveEncryptionKey(env: Env): Promise<CryptoKey> {
+	const keyMaterial = new TextEncoder().encode(env.ENTROPY_KEY || env.JWT_SECRET || 'fallback-key');
+	const hash = await crypto.subtle.digest('SHA-256', keyMaterial);
+	return crypto.subtle.importKey('raw', hash, 'AES-GCM', false, ['encrypt', 'decrypt']);
+}
+
+/**
+ * Encrypt a token string for storage in the database.
+ */
+async function encryptString(env: Env, plaintext: string): Promise<string> {
+	const key = await getDriveEncryptionKey(env);
+	const iv = crypto.getRandomValues(new Uint8Array(12));
+	const encoded = new TextEncoder().encode(plaintext);
+	const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
+	// Combine IV + ciphertext and base64 encode
+	const combined = new Uint8Array(iv.length + new Uint8Array(ciphertext).length);
+	combined.set(iv);
+	combined.set(new Uint8Array(ciphertext), iv.length);
+	return btoa(String.fromCharCode(...combined));
+}
+
+/**
+ * Decrypt a stored token string.
+ */
+async function decryptString(env: Env, encrypted: string): Promise<string | null> {
+	try {
+		const key = await getDriveEncryptionKey(env);
+		const combined = Uint8Array.from(atob(encrypted), (c) => c.charCodeAt(0));
+		const iv = combined.slice(0, 12);
+		const ciphertext = combined.slice(12);
+		const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
+		return new TextDecoder().decode(plaintext);
+	} catch {
+		return null;
+	}
+}
+
+/**
  * Encrypt tokens for storage in the database.
  */
 export async function encryptDriveTokens(
@@ -224,23 +263,11 @@ export async function encryptDriveTokens(
 	accessToken: string,
 	refreshToken?: string
 ): Promise<{ accessEncrypted: string; refreshEncrypted?: string }> {
-	const accessData: EncryptedTokenData = {
-		accessToken,
-		userId: '', // not used for this encryption, just the token
-		expiresAt: Date.now() + 3600 * 1000,
-	};
-	const accessEncrypted = await encryptTokens(accessData, env);
-
+	const accessEncrypted = await encryptString(env, accessToken);
 	let refreshEncrypted: string | undefined;
 	if (refreshToken) {
-		const refreshData: EncryptedTokenData = {
-			accessToken: refreshToken,
-			userId: '',
-			expiresAt: 0, // refresh tokens don't expire from our perspective
-		};
-		refreshEncrypted = await encryptTokens(refreshData, env);
+		refreshEncrypted = await encryptString(env, refreshToken);
 	}
-
 	return { accessEncrypted, refreshEncrypted };
 }
 
@@ -251,6 +278,5 @@ export async function decryptDriveToken(
 	env: Env,
 	encrypted: string
 ): Promise<string | null> {
-	const data = await decryptTokens(encrypted, env);
-	return data?.accessToken ?? null;
+	return decryptString(env, encrypted);
 }
