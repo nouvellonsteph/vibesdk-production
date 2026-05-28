@@ -14,3 +14,4 @@ export { AppService } from './services/AppService';
 export { ModelConfigService } from './services/ModelConfigService';
 export { ModelTestService } from './services/ModelTestService';
 export { TierService } from './services/TierService';
+export { EgressRuleService } from './services/EgressRuleService';

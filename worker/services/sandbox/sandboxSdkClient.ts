@@ -47,8 +47,7 @@ import { getPreviewDomain, resolvePreviewUrl } from '../../utils/urls';
 import { isDev } from 'worker/utils/envs'
 import { FileTreeBuilder } from './fileTreeBuilder';
 import { DeploymentTarget } from 'worker/agents/core/types';
-// Export the Sandbox class in your Worker
-export { Sandbox as UserAppSandboxService } from "@cloudflare/sandbox";
+// UserAppSandboxService is now exported from ./UserAppSandbox.ts with egress controls
 
 
 interface InstanceMetadata {
@@ -905,6 +904,24 @@ export class SandboxSdkClient extends BaseSandboxService {
     ): Promise<{previewURL: string, tunnelURL: string, processId: string, allocatedPort: number} | undefined> {
         try {
             const sandbox = this.getSandbox();
+
+            // Apply egress rules from admin configuration
+            try {
+                const { EgressRuleService } = await import('../../database/services/EgressRuleService');
+                const egressService = new EgressRuleService(env);
+                const hostLists = await egressService.getSandboxHostLists();
+                if (hostLists.allowedHosts.length > 0) {
+                    await sandbox.setAllowedHosts(hostLists.allowedHosts);
+                    this.logger.info('Applied egress allowedHosts', { count: hostLists.allowedHosts.length });
+                }
+                if (hostLists.deniedHosts.length > 0) {
+                    await sandbox.setDeniedHosts(hostLists.deniedHosts);
+                    this.logger.info('Applied egress deniedHosts', { count: hostLists.deniedHosts.length });
+                }
+            } catch (egressError) {
+                this.logger.warn('Failed to apply egress rules (non-fatal)', egressError);
+            }
+
             // Update project configuration with the specified project name
             await this.updateProjectConfiguration(instanceId, projectName);
             

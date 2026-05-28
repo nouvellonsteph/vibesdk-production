@@ -4,6 +4,14 @@
 
 import { BaseController } from '../baseController';
 import { TierService } from '../../../database/services/TierService';
+import { EgressRuleService } from '../../../database/services/EgressRuleService';
+import type {
+	EgressRulesListData,
+	EgressRuleData,
+	EgressRuleDeleteData,
+	CreateEgressRuleRequest,
+	UpdateEgressRuleRequest,
+} from './egress-types';
 import { createLogger } from '../../../logger';
 import { RouteContext } from '../../types/route-context';
 import type { ControllerResponse, ApiResponse } from '../types';
@@ -471,6 +479,94 @@ export class AdminController extends BaseController {
 			return AdminController.createSuccessResponse<AdminStatsData>(stats);
 		} catch (error) {
 			return AdminController.handleError(error, 'get admin stats') as ControllerResponse<ApiResponse<AdminStatsData>>;
+		}
+	}
+
+	// ========================================
+	// EGRESS RULES
+	// ========================================
+
+	static async listEgressRules(
+		_request: Request,
+		env: Env,
+		_ctx: ExecutionContext,
+		context: RouteContext
+	): Promise<ControllerResponse<ApiResponse<EgressRulesListData>>> {
+		try {
+			const scope = context.queryParams.get('scope') as 'global' | 'tier' | 'app' | undefined;
+			const egressService = new EgressRuleService(env);
+			const rules = await egressService.listRules(scope || undefined);
+			return AdminController.createSuccessResponse<EgressRulesListData>({ rules });
+		} catch (error) {
+			return AdminController.handleError(error, 'list egress rules') as ControllerResponse<ApiResponse<EgressRulesListData>>;
+		}
+	}
+
+	static async createEgressRule(
+		request: Request,
+		env: Env,
+		_ctx: ExecutionContext,
+		context: RouteContext
+	): Promise<ControllerResponse<ApiResponse<EgressRuleData>>> {
+		try {
+			const body = await request.json() as CreateEgressRuleRequest;
+			if (!body.name || !body.hostPattern) {
+				return AdminController.createErrorResponse<EgressRuleData>('Name and host pattern are required', 400);
+			}
+			if (!body.ruleType || !['allow', 'deny'].includes(body.ruleType)) {
+				return AdminController.createErrorResponse<EgressRuleData>('Rule type must be "allow" or "deny"', 400);
+			}
+
+			const egressService = new EgressRuleService(env);
+			const rule = await egressService.createRule({
+				...body,
+				createdBy: context.user!.id,
+			});
+			return AdminController.createSuccessResponse<EgressRuleData>({ rule });
+		} catch (error) {
+			return AdminController.handleError(error, 'create egress rule') as ControllerResponse<ApiResponse<EgressRuleData>>;
+		}
+	}
+
+	static async updateEgressRule(
+		request: Request,
+		env: Env,
+		_ctx: ExecutionContext,
+		context: RouteContext
+	): Promise<ControllerResponse<ApiResponse<EgressRuleData>>> {
+		try {
+			const ruleId = context.pathParams.ruleId;
+			if (!ruleId) {
+				return AdminController.createErrorResponse<EgressRuleData>('Rule ID is required', 400);
+			}
+			const body = await request.json() as UpdateEgressRuleRequest;
+			const egressService = new EgressRuleService(env);
+			const rule = await egressService.updateRule(ruleId, body);
+			if (!rule) {
+				return AdminController.createErrorResponse<EgressRuleData>('Rule not found', 404);
+			}
+			return AdminController.createSuccessResponse<EgressRuleData>({ rule });
+		} catch (error) {
+			return AdminController.handleError(error, 'update egress rule') as ControllerResponse<ApiResponse<EgressRuleData>>;
+		}
+	}
+
+	static async deleteEgressRule(
+		_request: Request,
+		env: Env,
+		_ctx: ExecutionContext,
+		context: RouteContext
+	): Promise<ControllerResponse<ApiResponse<EgressRuleDeleteData>>> {
+		try {
+			const ruleId = context.pathParams.ruleId;
+			if (!ruleId) {
+				return AdminController.createErrorResponse<EgressRuleDeleteData>('Rule ID is required', 400);
+			}
+			const egressService = new EgressRuleService(env);
+			await egressService.deleteRule(ruleId);
+			return AdminController.createSuccessResponse<EgressRuleDeleteData>({ success: true });
+		} catch (error) {
+			return AdminController.handleError(error, 'delete egress rule') as ControllerResponse<ApiResponse<EgressRuleDeleteData>>;
 		}
 	}
 }
