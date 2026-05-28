@@ -88,9 +88,18 @@ export const PreviewIframe = forwardRef<HTMLIFrameElement, PreviewIframeProps>(
 				if (previewType === 'sandbox-error') return null;
 				if (previewType === 'sandbox' || previewType === 'dispatcher') return previewType;
 				return 'sandbox';
-			} catch {
-				// CORS error from Access redirect = not authenticated
-				return 'access-blocked';
+			} catch (error) {
+				// Distinguish CORS/Access blocks from network errors.
+				// TypeError with failed fetch typically indicates a CORS block from Access redirect.
+				// AbortError means timeout -- sandbox is slow, should retry not prompt auth.
+				if (error instanceof DOMException && error.name === 'AbortError') {
+					return null; // Timeout, let retry loop continue
+				}
+				// TypeError from fetch = network/CORS failure, likely Access blocking
+				if (error instanceof TypeError) {
+					return 'access-blocked';
+				}
+				return null; // Unknown error, retry
 			}
 		}, []);
 

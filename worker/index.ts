@@ -288,6 +288,8 @@ const worker = {
 						},
 					});
 				}
+				// Disallowed origin -- return empty 204 without CORS headers
+				return new Response(null, { status: 204 });
 			}
 			return handleUserAppRequest(request, env);
 		}

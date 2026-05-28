@@ -1756,9 +1756,11 @@ export class SandboxSdkClient extends BaseSandboxService {
             this.logger.info('Processing deployment', { instanceId });
             
             // Step 0: Patch dynamic imports that break in production builds.
-            // The template uses `await import(/* @vite-ignore */ ...)` which works in
-            // Vite dev mode but is NOT bundled by wrangler/esbuild.
-            // Strategy: find the file, add static import, replace the dynamic import line.
+            // The template's src/index.ts uses `await import(/* @vite-ignore */ './user-routes')`
+            // which works in Vite dev but is NOT bundled by wrangler/esbuild.
+            // This patch is specific to the current app template pattern -- if the template
+            // changes its module name or import structure, this must be updated.
+            // Strategy: find files with @vite-ignore, add static import, replace the line.
             // Uses executeCommand (CWD = /workspace/{instanceId}/).
             this.logger.info('Patching dynamic imports for production build');
             try {
