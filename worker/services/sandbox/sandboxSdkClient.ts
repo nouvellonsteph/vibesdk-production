@@ -1757,26 +1757,43 @@ export class SandboxSdkClient extends BaseSandboxService {
             
             // Step 0: Patch dynamic imports that break in production builds.
             // The template uses `await import(/* @vite-ignore */ ...)` which works in
-            // Vite dev mode but is NOT bundled by wrangler/esbuild. Replace with a
-            // static import so the module is included in the production bundle.
+            // Vite dev mode but is NOT bundled by wrangler/esbuild. We replace it with
+            // a static import using the sandbox SDK's readFile/writeFile (no shell needed).
             this.logger.info('Patching dynamic imports for production build');
-            const patchScript = [
-                'const fs = require("fs");',
-                'const f = "src/index.ts";',
-                'if (!fs.existsSync(f)) { console.log("No src/index.ts found"); process.exit(0); }',
-                'let s = fs.readFileSync(f, "utf8");',
-                'if (!s.includes("@vite-ignore")) { console.log("No dynamic import to patch"); process.exit(0); }',
-                'if (!s.includes("import { userRoutes }")) {',
-                '  s = \'import { userRoutes } from "./user-routes";\\n\' + s;',
-                '}',
-                's = s.replace(/const\\s+mod\\s*=\\s*\\(await\\s+import\\([^)]*@vite-ignore[^)]*\\)\\)[^;]*;/, "const mod = { userRoutes } as UserRoutesModule;");',
-                'fs.writeFileSync(f, s);',
-                'console.log("Patched dynamic import to static import");',
-            ].join('\n');
+            const srcPath = `/workspace/${instanceId}/src/index.ts`;
             const patchSession = await this.getInstanceSession(instanceId);
-            await patchSession.writeFile('/tmp/patch-imports.js', patchScript);
-            const patchResult = await this.executeCommand(instanceId, 'bun /tmp/patch-imports.js');
-            this.logger.info('Patch result', { stdout: patchResult.stdout, stderr: patchResult.stderr, exitCode: patchResult.exitCode });
+            const srcFile = await patchSession.readFile(srcPath);
+
+            if (srcFile.success && srcFile.content.includes('@vite-ignore')) {
+                let content = srcFile.content;
+
+                // Add static import if not already present
+                if (!content.includes('import { userRoutes }')) {
+                    content = 'import { userRoutes } from "./user-routes";\n' + content;
+                }
+
+                // Replace the dynamic import with a static reference.
+                // Permissive regex: handles optional parens, any variable name, whitespace variations.
+                const before = content;
+                content = content.replace(
+                    /const\s+\w+\s*=\s*\(?await\s+import\([^)]*@vite-ignore[^)]*\)\)?[^;]*;/,
+                    'const mod = { userRoutes } as UserRoutesModule;'
+                );
+
+                if (content !== before) {
+                    await patchSession.writeFile(srcPath, content);
+                    this.logger.info('Patched dynamic import to static import for production build');
+                } else {
+                    this.logger.warn('Dynamic import regex did not match -- template format may have changed', {
+                        hint: 'The @vite-ignore marker was found but the import() pattern was not recognized'
+                    });
+                }
+            } else {
+                this.logger.info('No dynamic import patch needed', {
+                    fileExists: srcFile.success,
+                    hasViteIgnore: srcFile.success ? srcFile.content.includes('@vite-ignore') : false
+                });
+            }
 
             // Step 1: Run build commands (bun run build && bunx wrangler build)
             this.logger.info('Building project');
