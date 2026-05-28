@@ -31,12 +31,14 @@ export const DRIVE_API_VIRTUAL_HOST = 'drive.api';
 /**
  * Sandbox with egress filtering and credential injection for user apps.
  *
- * - Internet disabled by default (deny-all)
- * - Allowed/denied hosts set at runtime from admin egress rules
- * - `drive.api` virtual host: injects user's Google Drive OAuth token
+ * Internet is enabled by default. When admin configures egress allow rules,
+ * the sandbox switches to deny-by-default mode at runtime via setAllowedHosts().
+ * Deny rules are applied as blocklist additions regardless.
  */
 export class UserAppSandboxService extends Sandbox {
-	enableInternet = false;
+	// Internet enabled by default -- admin egress rules control access at runtime.
+	// Setting enableInternet=false here would block npm installs, cloudflared, etc.
+	enableInternet = true;
 }
 
 /**
