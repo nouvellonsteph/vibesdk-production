@@ -12,6 +12,7 @@ export interface TierFeatures {
 	canExportGithub: boolean;
 	canUseCustomModels: boolean;
 	canMakePublic: boolean;
+	canUseGoogleDrive: boolean;
 }
 
 const DEFAULT_FEATURES: TierFeatures = {
@@ -19,6 +20,7 @@ const DEFAULT_FEATURES: TierFeatures = {
 	canExportGithub: false,
 	canUseCustomModels: false,
 	canMakePublic: false,
+	canUseGoogleDrive: false,
 };
 
 /** Resolved effective limits for a user (tier + overrides merged) */
@@ -389,6 +391,7 @@ function parseTierFeatures(features: unknown): TierFeatures {
 		canExportGithub: f.canExportGithub === true,
 		canUseCustomModels: f.canUseCustomModels === true,
 		canMakePublic: f.canMakePublic === true,
+		canUseGoogleDrive: f.canUseGoogleDrive === true,
 	};
 }
 
@@ -403,5 +406,6 @@ function mergeFeatures(
 		canExportGithub: typeof o.canExportGithub === 'boolean' ? o.canExportGithub : tierFeatures.canExportGithub,
 		canUseCustomModels: typeof o.canUseCustomModels === 'boolean' ? o.canUseCustomModels : tierFeatures.canUseCustomModels,
 		canMakePublic: typeof o.canMakePublic === 'boolean' ? o.canMakePublic : tierFeatures.canMakePublic,
+		canUseGoogleDrive: typeof o.canUseGoogleDrive === 'boolean' ? o.canUseGoogleDrive : tierFeatures.canUseGoogleDrive,
 	};
 }

@@ -55,6 +55,7 @@ export interface TierInfo {
 		canExportGithub: boolean;
 		canUseCustomModels: boolean;
 		canMakePublic: boolean;
+		canUseGoogleDrive: boolean;
 	};
 	hasOverrides: boolean;
 }

@@ -70,9 +70,9 @@ export class IntegrationController extends BaseController {
 			const user = context.user;
 			if (!user) return IntegrationController.createErrorResponse('Auth required', 401);
 
-			// Tier gate
+			// Tier gate: check if user's tier allows Google Drive
 			const { checkTierFeature } = await import('../../../utils/tierGating');
-			const blocked = await checkTierFeature(env, user.id, 'canUseCustomModels', 'Google Drive integration');
+			const blocked = await checkTierFeature(env, user.id, 'canUseGoogleDrive', 'Google Drive integration');
 			if (blocked) return blocked as ControllerResponse<ApiResponse<IntegrationConnectData>>;
 
 			const url = new URL(request.url);

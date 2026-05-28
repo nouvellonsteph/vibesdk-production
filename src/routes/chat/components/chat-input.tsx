@@ -1,10 +1,18 @@
-import { type FormEvent, type RefObject } from 'react';
+import { type FormEvent, type RefObject, useState } from 'react';
 import { WebSocket } from 'partysocket';
-import { X } from 'lucide-react';
+import { X, FileText, Check, Loader2 } from 'lucide-react';
 import { PromptBox } from '@/components/prompt-box';
 import { sendWebSocketMessage } from '../utils/websocket-helpers';
 import type { ImageAttachment } from '@/api-types';
 import { type UsageSummary } from '@/hooks/use-limits';
+import { apiClient } from '@/lib/api-client';
+import { toast } from 'sonner';
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from '@/components/ui/tooltip';
+import { TooltipProvider } from '@/components/ui/tooltip';
 
 interface ChatInputProps {
 	// Form state
@@ -43,6 +51,11 @@ interface ChatInputProps {
 	// Usage limits
 	limitsData?: UsageSummary | null;
 	onConnectCloudflare?: () => void;
+
+	// Integrations
+	driveConnected?: boolean;
+	driveAllowed?: boolean;
+	onDriveStatusChange?: (connected: boolean) => void;
 }
 
 export function ChatInput({
@@ -64,7 +77,11 @@ export function ChatInput({
 	chatFormRef,
 	limitsData,
 	onConnectCloudflare,
+	driveConnected = false,
+	driveAllowed = false,
+	onDriveStatusChange,
 }: ChatInputProps) {
+	const [driveConnecting, setDriveConnecting] = useState(false);
 	const handleStopGeneration = () => {
 		if (websocket) {
 			sendWebSocketMessage(websocket, 'stop_generation');
@@ -94,27 +111,98 @@ export function ChatInput({
 		</button>
 	) : undefined;
 
+	const handleConnectDrive = async () => {
+		setDriveConnecting(true);
+		try {
+			const res = await apiClient.connectGoogleDrive();
+			if (res.data?.authUrl) {
+				const popup = window.open(res.data.authUrl, 'google_drive_oauth', 'width=600,height=700');
+				const onMessage = (event: MessageEvent) => {
+					if (event.data?.type === 'drive-connected') {
+						onDriveStatusChange?.(true);
+						toast.success('Google Drive connected -- the AI can now access your documents');
+						window.removeEventListener('message', onMessage);
+					}
+				};
+				window.addEventListener('message', onMessage);
+				const interval = setInterval(() => {
+					if (popup?.closed) {
+						clearInterval(interval);
+						setDriveConnecting(false);
+						window.removeEventListener('message', onMessage);
+					}
+				}, 500);
+			}
+		} catch {
+			toast.error('Failed to connect Google Drive');
+			setDriveConnecting(false);
+		}
+	};
+
+	// Show tools bar only when there are tools to display
+	const hasTools = driveAllowed;
+
 	return (
-		<PromptBox
-			value={newMessage}
-			onChange={onMessageChange}
-			onSubmit={() => onSubmit(new Event('submit') as unknown as FormEvent)}
-			placeholder={placeholder}
-			images={images}
-			onAddImages={onAddImages}
-			onRemoveImage={onRemoveImage}
-			isProcessing={isProcessing}
-			compactImagePreview
-			isDragging={isChatDragging}
-			dragHandlers={chatDragHandlers}
-			disabled={isChatDisabled}
-			limitsData={limitsData}
-			onConnectCloudflare={onConnectCloudflare}
-			variant="compact"
-			rightActions={stopButton}
-			maxWords={4000}
-			formRef={chatFormRef}
-			className="shrink-0 p-4 pb-5 bg-transparent"
-		/>
+		<div className="shrink-0">
+			<PromptBox
+				value={newMessage}
+				onChange={onMessageChange}
+				onSubmit={() => onSubmit(new Event('submit') as unknown as FormEvent)}
+				placeholder={placeholder}
+				images={images}
+				onAddImages={onAddImages}
+				onRemoveImage={onRemoveImage}
+				isProcessing={isProcessing}
+				compactImagePreview
+				isDragging={isChatDragging}
+				dragHandlers={chatDragHandlers}
+				disabled={isChatDisabled}
+				limitsData={limitsData}
+				onConnectCloudflare={onConnectCloudflare}
+				variant="compact"
+				rightActions={stopButton}
+				maxWords={4000}
+				formRef={chatFormRef}
+				className="p-4 pb-2 bg-transparent"
+			/>
+			{/* Tools bar beneath the prompt input */}
+			{hasTools && (
+				<div className="flex items-center gap-1.5 px-5 pb-4">
+					<span className="text-xs text-text-tertiary mr-1">Tools:</span>
+					<TooltipProvider delayDuration={200}>
+						{driveAllowed && (
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<button
+										type="button"
+										onClick={driveConnected ? undefined : handleConnectDrive}
+										disabled={driveConnecting}
+										className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs transition-colors ${
+											driveConnected
+												? 'bg-green-500/10 text-green-600 border border-green-500/20'
+												: 'bg-muted hover:bg-accent/10 text-text-secondary hover:text-text-primary border border-transparent'
+										}`}
+									>
+										{driveConnecting ? (
+											<Loader2 className="h-3 w-3 animate-spin" />
+										) : driveConnected ? (
+											<Check className="h-3 w-3" />
+										) : (
+											<FileText className="h-3 w-3" />
+										)}
+										Google Drive
+									</button>
+								</TooltipTrigger>
+								<TooltipContent side="top" className="text-xs">
+									{driveConnected
+										? 'Connected -- AI can search and read your Google Docs'
+										: 'Connect to use your Google Docs as data sources'}
+								</TooltipContent>
+							</Tooltip>
+						)}
+					</TooltipProvider>
+				</div>
+			)}
+		</div>
 	);
 }

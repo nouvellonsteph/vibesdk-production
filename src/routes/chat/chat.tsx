@@ -37,6 +37,7 @@ import { useVault } from '@/hooks/use-vault';
 import { VaultUnlockModal } from '@/components/vault';
 import { useLimitsContext } from '@/contexts/limits-context';
 import { checkCanSendPrompt, getBackendLimitDialog } from '@/utils/usage-limit-checker';
+import { apiClient } from '@/lib/api-client';
 
 const isPhasicBlueprint = (blueprint?: BlueprintType | null): blueprint is PhasicBlueprint =>
 	!!blueprint && 'implementationRoadmap' in blueprint;
@@ -69,6 +70,9 @@ export default function Chat() {
 
 	// Manual refresh trigger for preview
 	const [manualRefreshTrigger, setManualRefreshTrigger] = useState(0);
+
+	// Google Drive integration state (initialized after useLimitsContext below)
+	const [driveConnected, setDriveConnected] = useState(false);
 
 	// Debug message utilities
 	const addDebugMessage = useCallback(
@@ -195,6 +199,17 @@ export default function Chat() {
 	// Usage limits state
 	const { data: limitsData, loading: limitsLoading } = useLimitsContext();
 	const [showLimitDialog, setShowLimitDialog] = useState<React.ReactElement | null>(null);
+
+	// Google Drive: check if tier allows it and load connection status
+	const driveAllowed = limitsData?.tier?.features?.canUseGoogleDrive ?? false;
+	useEffect(() => {
+		if (user && driveAllowed) {
+			apiClient.listIntegrations().then((res) => {
+				const drive = res.data?.integrations?.find((i) => i.provider === 'google_drive');
+				if (drive?.isActive) setDriveConnected(true);
+			}).catch(() => {});
+		}
+	}, [user, driveAllowed]);
 	
 	// Debug: Log when backend error dialog state changes
 	useEffect(() => {
@@ -881,6 +896,9 @@ export default function Chat() {
 					chatFormRef={chatFormRef}
 					limitsData={limitsData}
 					onConnectCloudflare={() => { window.location.href = `/oauth/login?return_url=${encodeURIComponent(window.location.href)}`; }}
+					driveConnected={driveConnected}
+					driveAllowed={driveAllowed}
+					onDriveStatusChange={setDriveConnected}
 				/>
 				</motion.div>
 
