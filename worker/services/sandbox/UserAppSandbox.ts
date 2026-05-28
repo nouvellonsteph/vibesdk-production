@@ -11,14 +11,126 @@
  */
 
 import { Sandbox } from '@cloudflare/sandbox';
+import { createLogger } from '../../logger';
+import { IntegrationService } from '../../database/services/IntegrationService';
+import {
+	decryptDriveToken,
+	refreshDriveAccessToken,
+	encryptDriveTokens,
+} from '../integrations/GoogleDriveOAuth';
+
+const logger = createLogger('UserAppSandbox');
 
 /**
- * Sandbox with egress filtering for user-generated apps.
- * Internet is disabled by default. Allowed hosts are set at runtime
- * via setAllowedHosts() after loading admin-configured egress rules.
+ * Virtual hostname for Google Drive API access from sandboxed apps.
+ * Generated apps use `fetch('http://drive.api/drive/v3/files')` and
+ * the outbound handler transparently injects the user's OAuth token.
+ */
+export const DRIVE_API_VIRTUAL_HOST = 'drive.api';
+
+/**
+ * Sandbox with egress filtering and credential injection for user apps.
+ *
+ * - Internet disabled by default (deny-all)
+ * - Allowed/denied hosts set at runtime from admin egress rules
+ * - `drive.api` virtual host: injects user's Google Drive OAuth token
  */
 export class UserAppSandboxService extends Sandbox {
-	// Deny all outbound traffic by default.
-	// Allowed hosts are set at runtime via setAllowedHosts().
 	enableInternet = false;
 }
+
+/**
+ * Named outbound handlers for runtime assignment via setOutboundByHost().
+ *
+ * `driveProxy`: Intercepts requests to `drive.api`, looks up the user's
+ * Google Drive OAuth token from D1, injects it as an Authorization header,
+ * and forwards the request to the real Google APIs endpoint.
+ *
+ * The user's token is never exposed to the sandbox -- the generated app
+ * simply calls `http://drive.api/drive/v3/files` and this handler adds auth.
+ */
+UserAppSandboxService.outboundHandlers = {
+	driveProxy: async (
+		request: Request,
+		env: Env,
+		ctx: { containerId: string }
+	) => {
+		const url = new URL(request.url);
+		logger.info('Drive API proxy request', {
+			containerId: ctx.containerId,
+			path: url.pathname,
+			method: request.method,
+		});
+
+		// Look up the user's Drive token from KV.
+		// The containerId maps to a sandbox session which maps to a user.
+		// We store the mapping at sandbox creation time in KV.
+		const userId = await env.VibecoderStore.get(`sandbox_user:${ctx.containerId}`);
+		if (!userId) {
+			logger.warn('No user mapping for container', { containerId: ctx.containerId });
+			return new Response(JSON.stringify({ error: 'Drive integration not configured' }), {
+				status: 403,
+				headers: { 'Content-Type': 'application/json' },
+			});
+		}
+
+		// Get the user's Drive access token
+		const integrationService = new IntegrationService(env);
+		const integration = await integrationService.getIntegration(userId, 'google_drive');
+
+		if (!integration?.isActive || !integration.accessTokenEncrypted) {
+			return new Response(JSON.stringify({ error: 'Google Drive not connected' }), {
+				status: 403,
+				headers: { 'Content-Type': 'application/json' },
+			});
+		}
+
+		let accessToken = await decryptDriveToken(env, integration.accessTokenEncrypted);
+		if (!accessToken) {
+			return new Response(JSON.stringify({ error: 'Failed to decrypt Drive token' }), {
+				status: 500,
+				headers: { 'Content-Type': 'application/json' },
+			});
+		}
+
+		// Refresh if expired
+		const isExpired = integration.tokenExpiresAt &&
+			new Date(integration.tokenExpiresAt).getTime() < Date.now() + 60000;
+
+		if (isExpired && integration.refreshTokenEncrypted) {
+			const refreshToken = await decryptDriveToken(env, integration.refreshTokenEncrypted);
+			if (refreshToken) {
+				try {
+					const refreshed = await refreshDriveAccessToken(env, refreshToken);
+					accessToken = refreshed.accessToken;
+					// Update stored token (fire-and-forget)
+					encryptDriveTokens(env, refreshed.accessToken).then(({ accessEncrypted }) => {
+						integrationService.upsertIntegration({
+							userId,
+							provider: 'google_drive',
+							accessTokenEncrypted: accessEncrypted,
+							tokenExpiresAt: new Date(Date.now() + refreshed.expiresIn * 1000),
+							scopes: (integration.scopes as string[]) ?? [],
+						});
+					}).catch((err) => logger.error('Failed to update refreshed Drive token', err));
+				} catch (err) {
+					logger.error('Drive token refresh failed', err);
+				}
+			}
+		}
+
+		// Build the real Google API request
+		const googleUrl = `https://www.googleapis.com${url.pathname}${url.search}`;
+		const proxyHeaders = new Headers(request.headers);
+		proxyHeaders.set('Authorization', `Bearer ${accessToken}`);
+		proxyHeaders.delete('Host');
+
+		const proxyRequest = new Request(googleUrl, {
+			method: request.method,
+			headers: proxyHeaders,
+			body: request.body,
+		});
+
+		return fetch(proxyRequest);
+	},
+};

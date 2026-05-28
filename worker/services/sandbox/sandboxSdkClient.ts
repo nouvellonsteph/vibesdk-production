@@ -106,12 +106,14 @@ export class SandboxSdkClient extends BaseSandboxService {
     private sandbox: SandboxType;
     private metadataCache = new Map<string, InstanceMetadata>();
     private sessionCache = new Map<string, ExecutionSession>();
+    private agentId: string;
 
     constructor(sandboxId: string, agentId: string) {
         if (env.ALLOCATION_STRATEGY === AllocationStrategy.MANY_TO_ONE) {
             sandboxId = getAutoAllocatedSandbox(sandboxId);
         }
         super(sandboxId);
+        this.agentId = agentId;
         this.sandbox = this.getSandbox();
         
         this.logger = createObjectLogger(this, 'SandboxSdkClient');
@@ -905,14 +907,28 @@ export class SandboxSdkClient extends BaseSandboxService {
         try {
             const sandbox = this.getSandbox();
 
-            // Apply egress rules from admin configuration.
-            // setAllowedHosts/setDeniedHosts are runtime SDK methods for controlling
-            // outbound traffic from the sandbox container.
+            // Apply egress rules and integration hosts from admin configuration.
             try {
                 const { EgressRuleService } = await import('../../database/services/EgressRuleService');
                 const egressService = new EgressRuleService(env);
                 const hostLists = await egressService.getSandboxHostLists();
-                const sandboxAny = sandbox as unknown as Record<string, (hosts: string[]) => Promise<void>>;
+
+                // Check if user has Google Drive connected -- add drive.api virtual host
+                const { IntegrationService } = await import('../../database/services/IntegrationService');
+                const integrationService = new IntegrationService(env);
+                // Look up the user via the app record (agentId = appId)
+                const { AppService } = await import('../../database');
+                const appService = new AppService(env);
+                const appDetails = await appService.getAppDetails(this.agentId);
+                const appUserId = appDetails?.userId;
+                const hasDrive = appUserId ? await integrationService.hasActiveIntegration(appUserId, 'google_drive') : false;
+                if (hasDrive) {
+                    const { DRIVE_API_VIRTUAL_HOST } = await import('./UserAppSandbox');
+                    hostLists.allowedHosts.push(DRIVE_API_VIRTUAL_HOST);
+                    this.logger.info('Added drive.api virtual host for Drive integration');
+                }
+
+                const sandboxAny = sandbox as unknown as Record<string, (...args: unknown[]) => Promise<void>>;
                 if (hostLists.allowedHosts.length > 0 && typeof sandboxAny.setAllowedHosts === 'function') {
                     await sandboxAny.setAllowedHosts(hostLists.allowedHosts);
                     this.logger.info('Applied egress allowedHosts', { count: hostLists.allowedHosts.length });
@@ -920,6 +936,21 @@ export class SandboxSdkClient extends BaseSandboxService {
                 if (hostLists.deniedHosts.length > 0 && typeof sandboxAny.setDeniedHosts === 'function') {
                     await sandboxAny.setDeniedHosts(hostLists.deniedHosts);
                     this.logger.info('Applied egress deniedHosts', { count: hostLists.deniedHosts.length });
+                }
+
+                // Assign the driveProxy outbound handler to drive.api
+                if (hasDrive && typeof sandboxAny.setOutboundByHost === 'function') {
+                    await sandboxAny.setOutboundByHost('drive.api', 'driveProxy');
+                    this.logger.info('Assigned driveProxy outbound handler to drive.api');
+                }
+
+                // Store user->container mapping in KV for the outbound handler to look up
+                if (appUserId) {
+                    await env.VibecoderStore.put(
+                        `sandbox_user:${this.sandboxId}`,
+                        appUserId,
+                        { expirationTtl: 86400 } // 24h TTL
+                    );
                 }
             } catch (egressError) {
                 this.logger.warn('Failed to apply egress rules (non-fatal)', egressError);
