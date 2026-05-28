@@ -84,13 +84,23 @@ export async function getDriveConfigStatus(
 	const configured = !!(creds.clientId && creds.clientSecret);
 	const enabled = creds.enabled && configured;
 
-	// Check tier
+	// Check tier -- admins always have access
 	let tierAllowed = false;
 	try {
-		const { TierService } = await import('../../database/services/TierService');
-		const tierService = new TierService(env);
-		const limits = await tierService.getUserEffectiveLimits(userId);
-		tierAllowed = limits.features.canUseGoogleDrive;
+		// Check if user is admin (bypass tier check)
+		const { createDatabaseService } = await import('../../database/database');
+		const db = createDatabaseService(env);
+		const { eq } = await import('drizzle-orm');
+		const { users } = await import('../../database/schema');
+		const user = await db.db.select({ role: users.role }).from(users).where(eq(users.id, userId)).get();
+		if (user?.role === 'admin') {
+			tierAllowed = true;
+		} else {
+			const { TierService } = await import('../../database/services/TierService');
+			const tierService = new TierService(env);
+			const limits = await tierService.getUserEffectiveLimits(userId);
+			tierAllowed = limits.features.canUseGoogleDrive;
+		}
 	} catch {
 		// Tier check failed, default to false
 	}
