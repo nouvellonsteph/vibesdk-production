@@ -68,7 +68,19 @@ export class PhasicCodingBehavior extends BaseCodingBehavior<PhasicState> implem
         if (!templateInfo || !templateInfo.templateDetails) {
             throw new Error('Phasic initialization requires templateInfo.templateDetails');
         }
-        const { query, language, frameworks, hostname, inferenceContext, sandboxSessionId } = initArgs;
+        const { language, frameworks, hostname, inferenceContext, sandboxSessionId } = initArgs;
+        let { query } = initArgs;
+        
+        // Enrich query with Google Drive data if URLs are detected
+        try {
+            const { enrichQueryWithDriveData } = await import('../../utils/driveQueryEnricher');
+            const userId = inferenceContext?.metadata?.userId;
+            if (userId) {
+                query = await enrichQueryWithDriveData(query, userId);
+            }
+        } catch (error) {
+            this.logger.warn('Drive query enrichment failed (non-fatal)', error);
+        }
         
         // Generate a blueprint
         this.logger.info('Generating blueprint', { query, queryLength: query.length, imagesCount: initArgs.images?.length || 0 });
