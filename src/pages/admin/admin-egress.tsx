@@ -294,7 +294,7 @@ export default function AdminEgress() {
 							<CardDescription>
 								{mode === 'audit'
 									? 'All outbound traffic is allowed and logged. Review the traffic log below, then create rules before switching to enforce mode.'
-									: 'Outbound traffic is restricted to system-required hosts and admin-configured rules. Blocked hosts return connection errors.'}
+									: 'Outbound traffic is restricted to system-required hosts and admin-configured rules. Allowed traffic is still logged below so you can refine rules.'}
 							</CardDescription>
 						</div>
 						<div className="flex items-center gap-3">
@@ -320,7 +320,7 @@ export default function AdminEgress() {
 							<CardTitle>Traffic Log</CardTitle>
 							<CardDescription>
 								Outbound requests captured from sandbox containers. Grouped by host, sorted by frequency.
-								{mode === 'enforce' && ' Enable audit mode to capture new traffic.'}
+								{mode === 'enforce' && ' In enforce mode, only allowed hosts appear here.'}
 							</CardDescription>
 						</div>
 						<div className="flex gap-2">
@@ -349,9 +349,7 @@ export default function AdminEgress() {
 				<CardContent>
 					{trafficEntries.length === 0 ? (
 						<p className="text-muted-foreground py-8 text-center">
-							{mode === 'audit'
-								? 'No traffic captured yet. Sandbox containers will log outbound requests here.'
-								: 'No traffic logs available. Switch to audit mode to start capturing traffic.'}
+							No traffic captured yet. Sandbox containers will log outbound requests here as they run.
 						</p>
 					) : (
 						<Table>

@@ -210,27 +210,24 @@ export class EgressRuleService extends BaseService {
 		return value === 'audit' ? 'audit' : 'enforce';
 	}
 
-	/** Set egress mode. */
+	/** Set egress mode via upsert (insert or update on conflict). */
 	async setMode(mode: EgressMode): Promise<void> {
-		const existing = await this.getReadDb()
-			.select()
-			.from(schema.systemSettings)
-			.where(eq(schema.systemSettings.key, EGRESS_MODE_SETTING_KEY))
-			.get();
-
-		if (existing) {
-			await this.database
-				.update(schema.systemSettings)
-				.set({ value: mode, updatedAt: new Date() })
-				.where(eq(schema.systemSettings.key, EGRESS_MODE_SETTING_KEY));
-		} else {
-			await this.database.insert(schema.systemSettings).values({
+		await this.database
+			.insert(schema.systemSettings)
+			.values({
 				id: EGRESS_MODE_SETTING_KEY,
 				key: EGRESS_MODE_SETTING_KEY,
 				value: mode,
+				description: 'Egress mode: audit (log all traffic) or enforce (deny-by-default)',
 				updatedAt: new Date(),
+			})
+			.onConflictDoUpdate({
+				target: schema.systemSettings.id,
+				set: {
+					value: mode,
+					updatedAt: new Date(),
+				},
 			});
-		}
 	}
 
 	// ========================================
