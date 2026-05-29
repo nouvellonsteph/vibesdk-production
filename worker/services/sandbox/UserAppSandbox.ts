@@ -29,16 +29,52 @@ const logger = createLogger('UserAppSandbox');
 export const DRIVE_API_VIRTUAL_HOST = 'drive.api';
 
 /**
+ * System-required hosts that must always be allowed for the sandbox to function.
+ * These are added to the allowlist automatically regardless of admin egress rules.
+ */
+export const SYSTEM_REQUIRED_HOSTS = [
+	// Package registries (bun install, npm install)
+	'registry.npmjs.org',
+	'registry.yarnpkg.com',
+	'*.npmjs.org',
+	// Bun package manager
+	'bun.sh',
+	'*.bun.sh',
+	// Cloudflared tunnel
+	'*.trycloudflare.com',
+	'api.trycloudflare.com',
+	// Cloudflare APIs (wrangler, deployment)
+	'api.cloudflare.com',
+	'*.cloudflare.com',
+	'*.cloudflareinsights.com',
+	// DNS
+	'1.1.1.1',
+	'1.0.0.1',
+	// GitHub (for git operations, template downloads)
+	'github.com',
+	'*.github.com',
+	'*.githubusercontent.com',
+	// CDNs commonly needed by generated apps
+	'cdn.jsdelivr.net',
+	'unpkg.com',
+	'esm.sh',
+	'fonts.googleapis.com',
+	'fonts.gstatic.com',
+];
+
+/**
  * Sandbox with egress filtering and credential injection for user apps.
  *
- * Internet is enabled by default. When admin configures egress allow rules,
- * the sandbox switches to deny-by-default mode at runtime via setAllowedHosts().
- * Deny rules are applied as blocklist additions regardless.
+ * Internet is DISABLED by default. The allowedHosts list is populated with:
+ * 1. System-required hosts (npm, cloudflare, github, etc.)
+ * 2. Admin-configured allow rules from the egress_rules table
+ * 3. Integration-specific hosts (drive.api when Google Drive is connected)
+ *
+ * Admin deny rules are applied via deniedHosts.
  */
 export class UserAppSandboxService extends Sandbox {
-	// Internet enabled by default -- admin egress rules control access at runtime.
-	// Setting enableInternet=false here would block npm installs, cloudflared, etc.
-	enableInternet = true;
+	enableInternet = false;
+	allowedHosts = SYSTEM_REQUIRED_HOSTS;
 }
 
 /**

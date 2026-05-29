@@ -907,49 +907,61 @@ export class SandboxSdkClient extends BaseSandboxService {
         try {
             const sandbox = this.getSandbox();
 
-            // Apply egress rules and integration hosts from admin configuration.
+            // Apply egress rules: merge system defaults + admin rules + integration hosts.
+            // The sandbox class has enableInternet=false and allowedHosts=SYSTEM_REQUIRED_HOSTS.
+            // Here we add admin-configured allow rules and deny rules at runtime.
             try {
                 const { EgressRuleService } = await import('../../database/services/EgressRuleService');
                 const egressService = new EgressRuleService(env);
-                const hostLists = await egressService.getSandboxHostLists();
+                const adminRules = await egressService.resolvePolicy();
 
                 // Check if user has Google Drive connected -- add drive.api virtual host
                 const { IntegrationService } = await import('../../database/services/IntegrationService');
                 const integrationService = new IntegrationService(env);
-                // Look up the user via the app record (agentId = appId)
-                const { AppService } = await import('../../database');
-                const appService = new AppService(env);
-                const appDetails = await appService.getAppDetails(this.agentId);
-                const appUserId = appDetails?.userId;
                 const hasDrive = appUserId ? await integrationService.hasActiveIntegration(appUserId, 'google_drive') : false;
+
+                // Build the combined allow list: system hosts are on the class,
+                // admin allow rules are added at runtime via allowHost()
+                const sandboxAny = sandbox as unknown as Record<string, (...args: unknown[]) => Promise<void>>;
+
+                // Add admin-configured allowed hosts one by one
+                for (const host of adminRules.allowedHosts) {
+                    if (typeof sandboxAny.allowHost === 'function') {
+                        await sandboxAny.allowHost(host);
+                    }
+                }
+                if (adminRules.allowedHosts.length > 0) {
+                    this.logger.info('Added admin egress allowedHosts', { count: adminRules.allowedHosts.length, hosts: adminRules.allowedHosts });
+                }
+
+                // Add admin-configured denied hosts
+                for (const host of adminRules.deniedHosts) {
+                    if (typeof sandboxAny.denyHost === 'function') {
+                        await sandboxAny.denyHost(host);
+                    }
+                }
+                if (adminRules.deniedHosts.length > 0) {
+                    this.logger.info('Added admin egress deniedHosts', { count: adminRules.deniedHosts.length, hosts: adminRules.deniedHosts });
+                }
+
+                // Add drive.api if Drive is connected
                 if (hasDrive) {
                     const { DRIVE_API_VIRTUAL_HOST } = await import('./UserAppSandbox');
-                    hostLists.allowedHosts.push(DRIVE_API_VIRTUAL_HOST);
+                    if (typeof sandboxAny.allowHost === 'function') {
+                        await sandboxAny.allowHost(DRIVE_API_VIRTUAL_HOST);
+                    }
+                    if (typeof sandboxAny.setOutboundByHost === 'function') {
+                        await sandboxAny.setOutboundByHost('drive.api', 'driveProxy');
+                    }
                     this.logger.info('Added drive.api virtual host for Drive integration');
                 }
 
-                const sandboxAny = sandbox as unknown as Record<string, (...args: unknown[]) => Promise<void>>;
-                if (hostLists.allowedHosts.length > 0 && typeof sandboxAny.setAllowedHosts === 'function') {
-                    await sandboxAny.setAllowedHosts(hostLists.allowedHosts);
-                    this.logger.info('Applied egress allowedHosts', { count: hostLists.allowedHosts.length });
-                }
-                if (hostLists.deniedHosts.length > 0 && typeof sandboxAny.setDeniedHosts === 'function') {
-                    await sandboxAny.setDeniedHosts(hostLists.deniedHosts);
-                    this.logger.info('Applied egress deniedHosts', { count: hostLists.deniedHosts.length });
-                }
-
-                // Assign the driveProxy outbound handler to drive.api
-                if (hasDrive && typeof sandboxAny.setOutboundByHost === 'function') {
-                    await sandboxAny.setOutboundByHost('drive.api', 'driveProxy');
-                    this.logger.info('Assigned driveProxy outbound handler to drive.api');
-                }
-
-                // Store user->container mapping in KV for the outbound handler to look up
+                // Store user->container mapping in KV for the outbound handler
                 if (appUserId) {
                     await env.VibecoderStore.put(
                         `sandbox_user:${this.sandboxId}`,
                         appUserId,
-                        { expirationTtl: 86400 } // 24h TTL
+                        { expirationTtl: 86400 }
                     );
                 }
             } catch (egressError) {
