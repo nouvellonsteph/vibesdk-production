@@ -907,51 +907,64 @@ export class SandboxSdkClient extends BaseSandboxService {
         try {
             const sandbox = this.getSandbox();
 
-            // Apply egress rules: merge system defaults + admin rules + integration hosts.
-            // The sandbox class has enableInternet=false and allowedHosts=SYSTEM_REQUIRED_HOSTS.
-            // Here we add admin-configured allow rules and deny rules at runtime.
+            // Apply egress rules based on admin-configured mode (audit or enforce).
+            // - AUDIT: enableInternet=true, all traffic logged via outbound handler
+            // - ENFORCE: enableInternet=false, only system+admin allowed hosts permitted
             try {
                 const { EgressRuleService } = await import('../../database/services/EgressRuleService');
                 const egressService = new EgressRuleService(env);
-                const adminRules = await egressService.resolvePolicy();
+                const [egressMode, adminRules] = await Promise.all([
+                    egressService.getMode(),
+                    egressService.resolvePolicy(),
+                ]);
 
-                // Check if user has Google Drive connected -- add drive.api virtual host
+                const sandboxAny = sandbox as unknown as Record<string, unknown>;
+
+                if (egressMode === 'audit') {
+                    // Audit mode: allow all traffic, outbound handler logs everything
+                    if ('enableInternet' in sandboxAny) {
+                        (sandboxAny as { enableInternet: boolean }).enableInternet = true;
+                    }
+                    this.logger.info('Egress mode: AUDIT (all traffic allowed, logging enabled)');
+                } else {
+                    // Enforce mode: deny-by-default with allowlist
+                    this.logger.info('Egress mode: ENFORCE (deny-by-default with allowlist)');
+
+                    // Add admin-configured allowed hosts
+                    const callSandbox = sandboxAny as Record<string, (...args: unknown[]) => Promise<void>>;
+                    for (const host of adminRules.allowedHosts) {
+                        if (typeof callSandbox.allowHost === 'function') {
+                            await callSandbox.allowHost(host);
+                        }
+                    }
+                    if (adminRules.allowedHosts.length > 0) {
+                        this.logger.info('Added admin egress allowedHosts', { count: adminRules.allowedHosts.length });
+                    }
+
+                    // Add admin-configured denied hosts
+                    for (const host of adminRules.deniedHosts) {
+                        if (typeof callSandbox.denyHost === 'function') {
+                            await callSandbox.denyHost(host);
+                        }
+                    }
+                    if (adminRules.deniedHosts.length > 0) {
+                        this.logger.info('Added admin egress deniedHosts', { count: adminRules.deniedHosts.length });
+                    }
+                }
+
+                // Check if user has Google Drive connected
                 const { IntegrationService } = await import('../../database/services/IntegrationService');
                 const integrationService = new IntegrationService(env);
                 const hasDrive = appUserId ? await integrationService.hasActiveIntegration(appUserId, 'google_drive') : false;
 
-                // Build the combined allow list: system hosts are on the class,
-                // admin allow rules are added at runtime via allowHost()
-                const sandboxAny = sandbox as unknown as Record<string, (...args: unknown[]) => Promise<void>>;
-
-                // Add admin-configured allowed hosts one by one
-                for (const host of adminRules.allowedHosts) {
-                    if (typeof sandboxAny.allowHost === 'function') {
-                        await sandboxAny.allowHost(host);
-                    }
-                }
-                if (adminRules.allowedHosts.length > 0) {
-                    this.logger.info('Added admin egress allowedHosts', { count: adminRules.allowedHosts.length, hosts: adminRules.allowedHosts });
-                }
-
-                // Add admin-configured denied hosts
-                for (const host of adminRules.deniedHosts) {
-                    if (typeof sandboxAny.denyHost === 'function') {
-                        await sandboxAny.denyHost(host);
-                    }
-                }
-                if (adminRules.deniedHosts.length > 0) {
-                    this.logger.info('Added admin egress deniedHosts', { count: adminRules.deniedHosts.length, hosts: adminRules.deniedHosts });
-                }
-
-                // Add drive.api if Drive is connected
                 if (hasDrive) {
                     const { DRIVE_API_VIRTUAL_HOST } = await import('./UserAppSandbox');
-                    if (typeof sandboxAny.allowHost === 'function') {
-                        await sandboxAny.allowHost(DRIVE_API_VIRTUAL_HOST);
+                    const callSandbox = sandboxAny as Record<string, (...args: unknown[]) => Promise<void>>;
+                    if (typeof callSandbox.allowHost === 'function') {
+                        await callSandbox.allowHost(DRIVE_API_VIRTUAL_HOST);
                     }
-                    if (typeof sandboxAny.setOutboundByHost === 'function') {
-                        await sandboxAny.setOutboundByHost('drive.api', 'driveProxy');
+                    if (typeof callSandbox.setOutboundByHost === 'function') {
+                        await callSandbox.setOutboundByHost('drive.api', 'driveProxy');
                     }
                     this.logger.info('Added drive.api virtual host for Drive integration');
                 }

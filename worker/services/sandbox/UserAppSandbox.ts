@@ -65,17 +65,63 @@ export const SYSTEM_REQUIRED_HOSTS = [
 /**
  * Sandbox with egress filtering and credential injection for user apps.
  *
- * Internet is DISABLED by default. The allowedHosts list is populated with:
- * 1. System-required hosts (npm, cloudflare, github, etc.)
- * 2. Admin-configured allow rules from the egress_rules table
- * 3. Integration-specific hosts (drive.api when Google Drive is connected)
+ * Two modes controlled by admin:
+ * 1. AUDIT mode (enableInternet=true): All traffic allowed, every request logged
+ *    to KV for admin review. Admin can then create rules from real traffic.
+ * 2. ENFORCE mode (enableInternet=false): Only system-required hosts and
+ *    admin-configured allow rules permitted. Deny rules block specific hosts.
  *
- * Admin deny rules are applied via deniedHosts.
+ * Mode is set at runtime via the egress configuration in system_settings.
  */
 export class UserAppSandboxService extends Sandbox {
+	// Default to enforce mode. Audit mode is set at runtime.
 	enableInternet = false;
 	allowedHosts = SYSTEM_REQUIRED_HOSTS;
 }
+
+/**
+ * Outbound handler: logs all outbound HTTP/HTTPS traffic for audit mode.
+ * In audit mode, all traffic is allowed but logged to KV for admin review.
+ * In enforce mode, this handler is only invoked for allowed hosts.
+ */
+UserAppSandboxService.outbound = async (
+	request: Request,
+	env: unknown,
+	ctx: { containerId: string }
+) => {
+	const url = new URL(request.url);
+	const envTyped = env as Env;
+
+	// Log the outbound request to KV for admin audit
+	try {
+		const logEntry = {
+			host: url.hostname,
+			method: request.method,
+			path: url.pathname,
+			containerId: ctx.containerId,
+			timestamp: new Date().toISOString(),
+		};
+
+		// Append to a rolling log list in KV (fire-and-forget)
+		const logKey = `egress_log:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+		envTyped.VibecoderStore.put(logKey, JSON.stringify(logEntry), {
+			expirationTtl: 86400, // 24h TTL
+		}).catch(() => {});
+
+		// Also maintain a host frequency counter for the admin dashboard
+		const counterKey = `egress_host:${url.hostname}`;
+		const current = await envTyped.VibecoderStore.get(counterKey);
+		const count = current ? parseInt(current, 10) + 1 : 1;
+		envTyped.VibecoderStore.put(counterKey, String(count), {
+			expirationTtl: 86400,
+		}).catch(() => {});
+	} catch {
+		// Logging failure should never block traffic
+	}
+
+	// Forward the request
+	return fetch(request);
+} as unknown as typeof Sandbox.outbound;
 
 /**
  * Named outbound handlers for runtime assignment via setOutboundByHost().

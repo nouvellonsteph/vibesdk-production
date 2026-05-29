@@ -11,6 +11,10 @@ import type {
 	EgressRuleDeleteData,
 	CreateEgressRuleRequest,
 	UpdateEgressRuleRequest,
+	EgressModeData,
+	SetEgressModeRequest,
+	EgressTrafficLogsData,
+	EgressClearLogsData,
 } from './egress-types';
 import { createLogger } from '../../../logger';
 import { RouteContext } from '../../types/route-context';
@@ -567,6 +571,82 @@ export class AdminController extends BaseController {
 			return AdminController.createSuccessResponse<EgressRuleDeleteData>({ success: true });
 		} catch (error) {
 			return AdminController.handleError(error, 'delete egress rule') as ControllerResponse<ApiResponse<EgressRuleDeleteData>>;
+		}
+	}
+
+	// ========================================
+	// EGRESS MODE + TRAFFIC LOGS
+	// ========================================
+
+	/** GET /api/admin/egress-mode -- get current egress mode (audit/enforce) */
+	static async getEgressMode(
+		_request: Request,
+		env: Env,
+		_ctx: ExecutionContext,
+		_context: RouteContext
+	): Promise<ControllerResponse<ApiResponse<EgressModeData>>> {
+		try {
+			const egressService = new EgressRuleService(env);
+			const mode = await egressService.getMode();
+			return AdminController.createSuccessResponse<EgressModeData>({ mode });
+		} catch (error) {
+			return AdminController.handleError(error, 'get egress mode') as ControllerResponse<ApiResponse<EgressModeData>>;
+		}
+	}
+
+	/** PUT /api/admin/egress-mode -- set egress mode */
+	static async setEgressMode(
+		request: Request,
+		env: Env,
+		_ctx: ExecutionContext,
+		_context: RouteContext
+	): Promise<ControllerResponse<ApiResponse<EgressModeData>>> {
+		try {
+			const body = await request.json() as SetEgressModeRequest;
+			if (!body.mode || !['audit', 'enforce'].includes(body.mode)) {
+				return AdminController.createErrorResponse<EgressModeData>('Mode must be "audit" or "enforce"', 400);
+			}
+			const egressService = new EgressRuleService(env);
+			await egressService.setMode(body.mode);
+			logger.info('Egress mode changed', { mode: body.mode });
+			return AdminController.createSuccessResponse<EgressModeData>({ mode: body.mode });
+		} catch (error) {
+			return AdminController.handleError(error, 'set egress mode') as ControllerResponse<ApiResponse<EgressModeData>>;
+		}
+	}
+
+	/** GET /api/admin/egress-logs -- get aggregated traffic logs from audit mode */
+	static async getEgressLogs(
+		_request: Request,
+		env: Env,
+		_ctx: ExecutionContext,
+		_context: RouteContext
+	): Promise<ControllerResponse<ApiResponse<EgressTrafficLogsData>>> {
+		try {
+			const egressService = new EgressRuleService(env);
+			const [entries, mode] = await Promise.all([
+				EgressRuleService.getTrafficLogs(env),
+				egressService.getMode(),
+			]);
+			return AdminController.createSuccessResponse<EgressTrafficLogsData>({ entries, mode });
+		} catch (error) {
+			return AdminController.handleError(error, 'get egress logs') as ControllerResponse<ApiResponse<EgressTrafficLogsData>>;
+		}
+	}
+
+	/** DELETE /api/admin/egress-logs -- clear all traffic logs */
+	static async clearEgressLogs(
+		_request: Request,
+		env: Env,
+		_ctx: ExecutionContext,
+		_context: RouteContext
+	): Promise<ControllerResponse<ApiResponse<EgressClearLogsData>>> {
+		try {
+			const deletedCount = await EgressRuleService.clearTrafficLogs(env);
+			logger.info('Egress logs cleared', { deletedCount });
+			return AdminController.createSuccessResponse<EgressClearLogsData>({ deletedCount });
+		} catch (error) {
+			return AdminController.handleError(error, 'clear egress logs') as ControllerResponse<ApiResponse<EgressClearLogsData>>;
 		}
 	}
 

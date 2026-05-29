@@ -3,7 +3,9 @@
  */
 
 import type { EgressRule } from '../../../database/schema';
+import type { EgressTrafficEntry, EgressMode } from '../../../database/services/EgressRuleService';
 
+// Rule CRUD
 export interface EgressRulesListData {
 	rules: EgressRule[];
 }
@@ -33,3 +35,24 @@ export interface UpdateEgressRuleRequest {
 	scopeId?: string | null;
 	hostPattern?: string;
 }
+
+// Egress mode (audit / enforce)
+export interface EgressModeData {
+	mode: EgressMode;
+}
+
+export interface SetEgressModeRequest {
+	mode: EgressMode;
+}
+
+// Traffic logs (audit mode)
+export interface EgressTrafficLogsData {
+	entries: EgressTrafficEntry[];
+	mode: EgressMode;
+}
+
+export interface EgressClearLogsData {
+	deletedCount: number;
+}
+
+export type { EgressTrafficEntry, EgressMode };

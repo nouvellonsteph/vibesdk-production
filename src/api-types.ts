@@ -333,6 +333,12 @@ export type {
     EgressRuleDeleteData,
     CreateEgressRuleRequest,
     UpdateEgressRuleRequest,
+    EgressModeData,
+    SetEgressModeRequest,
+    EgressTrafficLogsData,
+    EgressClearLogsData,
+    EgressTrafficEntry,
+    EgressMode,
 } from 'worker/api/controllers/admin/egress-types';
 
 // Tier types

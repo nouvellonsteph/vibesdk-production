@@ -2,6 +2,10 @@
  * Egress Rule Service
  * Manages outbound traffic rules for sandboxes and deployed apps.
  * Rules control which external hosts can be reached.
+ *
+ * Supports two modes:
+ * - AUDIT: internet enabled, all outbound requests logged for review
+ * - ENFORCE: internet disabled, only system + admin-allowed hosts permitted
  */
 
 import { eq, and, or } from 'drizzle-orm';
@@ -11,6 +15,9 @@ import { generateId } from '../../utils/idGenerator';
 
 export type RuleType = 'allow' | 'deny';
 export type RuleScope = 'global' | 'tier' | 'app';
+export type EgressMode = 'audit' | 'enforce';
+
+const EGRESS_MODE_SETTING_KEY = 'egress_mode';
 
 /** Resolved egress policy for a specific context (user + app) */
 export interface EgressPolicy {
@@ -172,4 +179,132 @@ export class EgressRuleService extends BaseService {
 			deniedHosts: policy.deniedHosts,
 		};
 	}
+
+	// ========================================
+	// EGRESS MODE (audit / enforce)
+	// ========================================
+
+	/** Get current egress mode. Defaults to 'enforce'. */
+	async getMode(): Promise<EgressMode> {
+		const row = await this.getReadDb()
+			.select()
+			.from(schema.systemSettings)
+			.where(eq(schema.systemSettings.key, EGRESS_MODE_SETTING_KEY))
+			.get();
+
+		if (!row?.value) return 'enforce';
+		const value = row.value as string;
+		return value === 'audit' ? 'audit' : 'enforce';
+	}
+
+	/** Set egress mode. */
+	async setMode(mode: EgressMode): Promise<void> {
+		const existing = await this.getReadDb()
+			.select()
+			.from(schema.systemSettings)
+			.where(eq(schema.systemSettings.key, EGRESS_MODE_SETTING_KEY))
+			.get();
+
+		if (existing) {
+			await this.database
+				.update(schema.systemSettings)
+				.set({ value: mode, updatedAt: new Date() })
+				.where(eq(schema.systemSettings.key, EGRESS_MODE_SETTING_KEY));
+		} else {
+			await this.database.insert(schema.systemSettings).values({
+				key: EGRESS_MODE_SETTING_KEY,
+				value: mode,
+				updatedAt: new Date(),
+			});
+		}
+	}
+
+	// ========================================
+	// EGRESS LOGS (KV-backed, read via env)
+	// ========================================
+
+	/**
+	 * Get aggregated egress traffic logs from KV.
+	 * Groups by host with request count and last seen timestamp.
+	 * Returns hosts sorted by count (most traffic first).
+	 */
+	static async getTrafficLogs(env: Env): Promise<EgressTrafficEntry[]> {
+		// List all egress_log: keys from KV
+		const logKeys = await env.VibecoderStore.list({ prefix: 'egress_log:' });
+		const hostMap = new Map<string, { count: number; lastSeen: string; methods: Set<string>; paths: Set<string> }>();
+
+		// Fetch all log entries in parallel (batch of 50)
+		const keys = logKeys.keys.map((k) => k.name);
+		const batchSize = 50;
+		for (let i = 0; i < keys.length; i += batchSize) {
+			const batch = keys.slice(i, i + batchSize);
+			const values = await Promise.all(batch.map((k) => env.VibecoderStore.get(k)));
+
+			for (const raw of values) {
+				if (!raw) continue;
+				let entry: { host?: string; method?: string; path?: string; timestamp?: string };
+				try {
+					entry = JSON.parse(raw) as typeof entry;
+				} catch {
+					continue;
+				}
+				if (!entry.host) continue;
+
+				const existing = hostMap.get(entry.host);
+				if (existing) {
+					existing.count++;
+					if (entry.timestamp && entry.timestamp > existing.lastSeen) {
+						existing.lastSeen = entry.timestamp;
+					}
+					if (entry.method) existing.methods.add(entry.method);
+					if (entry.path) existing.paths.add(entry.path);
+				} else {
+					hostMap.set(entry.host, {
+						count: 1,
+						lastSeen: entry.timestamp ?? new Date().toISOString(),
+						methods: new Set(entry.method ? [entry.method] : []),
+						paths: new Set(entry.path ? [entry.path] : []),
+					});
+				}
+			}
+		}
+
+		// Convert to sorted array
+		const entries: EgressTrafficEntry[] = [];
+		for (const [host, data] of hostMap) {
+			entries.push({
+				host,
+				requestCount: data.count,
+				lastSeen: data.lastSeen,
+				methods: Array.from(data.methods),
+				samplePaths: Array.from(data.paths).slice(0, 5),
+			});
+		}
+
+		entries.sort((a, b) => b.requestCount - a.requestCount);
+		return entries;
+	}
+
+	/** Clear all egress logs from KV. */
+	static async clearTrafficLogs(env: Env): Promise<number> {
+		const logKeys = await env.VibecoderStore.list({ prefix: 'egress_log:' });
+		const hostKeys = await env.VibecoderStore.list({ prefix: 'egress_host:' });
+
+		const allKeys = [
+			...logKeys.keys.map((k) => k.name),
+			...hostKeys.keys.map((k) => k.name),
+		];
+
+		await Promise.all(allKeys.map((k) => env.VibecoderStore.delete(k)));
+		return allKeys.length;
+	}
+}
+
+/** A single host's aggregated traffic data from audit mode. */
+export interface EgressTrafficEntry {
+	host: string;
+	requestCount: number;
+	lastSeen: string;
+	methods: string[];
+	samplePaths: string[];
 }

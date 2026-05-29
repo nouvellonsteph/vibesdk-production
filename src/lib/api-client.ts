@@ -76,6 +76,10 @@ import type{
 	EgressRuleDeleteData,
 	CreateEgressRuleRequest,
 	UpdateEgressRuleRequest,
+	EgressModeData,
+	SetEgressModeRequest,
+	EgressTrafficLogsData,
+	EgressClearLogsData,
 } from '@/api-types';
 import {
 	RateLimitExceededError,
@@ -1461,6 +1465,35 @@ class ApiClient {
 	/** Delete an egress rule */
 	async adminDeleteEgressRule(ruleId: string): Promise<ApiResponse<EgressRuleDeleteData>> {
 		return this.request<EgressRuleDeleteData>(`/api/admin/egress-rules/${ruleId}`, {
+			method: 'DELETE',
+		});
+	}
+
+	// ========================================
+	// EGRESS MODE + TRAFFIC LOGS
+	// ========================================
+
+	/** Get current egress mode (audit / enforce) */
+	async adminGetEgressMode(): Promise<ApiResponse<EgressModeData>> {
+		return this.request<EgressModeData>('/api/admin/egress-mode');
+	}
+
+	/** Set egress mode */
+	async adminSetEgressMode(data: SetEgressModeRequest): Promise<ApiResponse<EgressModeData>> {
+		return this.request<EgressModeData>('/api/admin/egress-mode', {
+			method: 'PUT',
+			body: data,
+		});
+	}
+
+	/** Get aggregated egress traffic logs */
+	async adminGetEgressLogs(): Promise<ApiResponse<EgressTrafficLogsData>> {
+		return this.request<EgressTrafficLogsData>('/api/admin/egress-logs');
+	}
+
+	/** Clear all egress traffic logs */
+	async adminClearEgressLogs(): Promise<ApiResponse<EgressClearLogsData>> {
+		return this.request<EgressClearLogsData>('/api/admin/egress-logs', {
 			method: 'DELETE',
 		});
 	}

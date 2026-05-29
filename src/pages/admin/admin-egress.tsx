@@ -1,50 +1,36 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { apiClient } from '@/lib/api-client';
 import type {
 	EgressRule,
+	EgressMode,
+	EgressTrafficEntry,
 	CreateEgressRuleRequest,
 	UpdateEgressRuleRequest,
 } from '@/api-types';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import {
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableHeader,
-	TableRow,
+	Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import {
-	Dialog,
-	DialogContent,
-	DialogHeader,
-	DialogTitle,
-	DialogFooter,
+	Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
 import {
-	AlertDialog,
-	AlertDialogAction,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogDescription,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
+	AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+	AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
+	Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
-import { Pencil, Trash2, Plus } from 'lucide-react';
+import {
+	Pencil, Trash2, Plus, ShieldCheck, Eye, RefreshCw, ShieldPlus, Eraser,
+} from 'lucide-react';
 
 type RuleType = 'allow' | 'deny';
 type RuleScope = 'global' | 'tier' | 'app';
@@ -60,12 +46,8 @@ interface RuleFormState {
 
 function emptyFormState(): RuleFormState {
 	return {
-		name: '',
-		description: '',
-		ruleType: 'allow',
-		scope: 'global',
-		scopeId: '',
-		hostPattern: '',
+		name: '', description: '', ruleType: 'allow',
+		scope: 'global', scopeId: '', hostPattern: '',
 	};
 }
 
@@ -81,10 +63,20 @@ function ruleToFormState(rule: EgressRule): RuleFormState {
 }
 
 export default function AdminEgress() {
-	const [rules, setRules] = useState<EgressRule[]>([]);
-	const [loading, setLoading] = useState(true);
+	// Egress mode
+	const [mode, setMode] = useState<EgressMode>('enforce');
+	const [modeLoading, setModeLoading] = useState(true);
+	const [modeSwitching, setModeSwitching] = useState(false);
 
-	// Dialog state for create/edit
+	// Traffic logs
+	const [trafficEntries, setTrafficEntries] = useState<EgressTrafficEntry[]>([]);
+	const [logsLoading, setLogsLoading] = useState(false);
+
+	// Rules
+	const [rules, setRules] = useState<EgressRule[]>([]);
+	const [rulesLoading, setRulesLoading] = useState(true);
+
+	// Dialog state for create/edit rules
 	const [dialogOpen, setDialogOpen] = useState(false);
 	const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
 	const [form, setForm] = useState<RuleFormState>(emptyFormState());
@@ -94,7 +86,38 @@ export default function AdminEgress() {
 	const [deletingRuleId, setDeletingRuleId] = useState<string | null>(null);
 	const [deleting, setDeleting] = useState(false);
 
-	async function fetchRules() {
+	// Clear logs confirmation
+	const [clearingLogs, setClearingLogs] = useState(false);
+	const [showClearConfirm, setShowClearConfirm] = useState(false);
+
+	const fetchMode = useCallback(async () => {
+		try {
+			const response = await apiClient.adminGetEgressMode();
+			if (response.data) {
+				setMode(response.data.mode);
+			}
+		} catch (err) {
+			console.error('Failed to fetch egress mode:', err);
+		} finally {
+			setModeLoading(false);
+		}
+	}, []);
+
+	const fetchLogs = useCallback(async () => {
+		setLogsLoading(true);
+		try {
+			const response = await apiClient.adminGetEgressLogs();
+			if (response.data) {
+				setTrafficEntries(response.data.entries);
+			}
+		} catch (err) {
+			console.error('Failed to fetch egress logs:', err);
+		} finally {
+			setLogsLoading(false);
+		}
+	}, []);
+
+	const fetchRules = useCallback(async () => {
 		try {
 			const response = await apiClient.adminListEgressRules();
 			if (response.data) {
@@ -103,13 +126,67 @@ export default function AdminEgress() {
 		} catch (err) {
 			console.error('Failed to fetch egress rules:', err);
 		} finally {
-			setLoading(false);
+			setRulesLoading(false);
+		}
+	}, []);
+
+	useEffect(() => {
+		fetchMode();
+		fetchRules();
+		fetchLogs();
+	}, [fetchMode, fetchRules, fetchLogs]);
+
+	async function handleModeToggle(checked: boolean) {
+		const newMode: EgressMode = checked ? 'audit' : 'enforce';
+		setModeSwitching(true);
+		try {
+			await apiClient.adminSetEgressMode({ mode: newMode });
+			setMode(newMode);
+			toast.success(
+				newMode === 'audit'
+					? 'Switched to Audit mode -- all traffic will be logged'
+					: 'Switched to Enforce mode -- only allowed hosts permitted'
+			);
+			// Refresh logs when switching to audit
+			if (newMode === 'audit') {
+				await fetchLogs();
+			}
+		} catch {
+			toast.error('Failed to change egress mode');
+		} finally {
+			setModeSwitching(false);
 		}
 	}
 
-	useEffect(() => {
-		fetchRules();
-	}, []);
+	async function handleClearLogs() {
+		setClearingLogs(true);
+		try {
+			const response = await apiClient.adminClearEgressLogs();
+			if (response.data) {
+				toast.success(`Cleared ${response.data.deletedCount} log entries`);
+			}
+			setTrafficEntries([]);
+			setShowClearConfirm(false);
+		} catch {
+			toast.error('Failed to clear logs');
+		} finally {
+			setClearingLogs(false);
+		}
+	}
+
+	// Create a rule from a traffic log entry
+	function createRuleFromTraffic(entry: EgressTrafficEntry, ruleType: RuleType) {
+		setEditingRuleId(null);
+		setForm({
+			name: `${ruleType === 'allow' ? 'Allow' : 'Deny'} ${entry.host}`,
+			description: `Created from traffic log (${entry.requestCount} requests observed)`,
+			ruleType,
+			scope: 'global',
+			scopeId: '',
+			hostPattern: entry.host,
+		});
+		setDialogOpen(true);
+	}
 
 	function openCreateDialog() {
 		setEditingRuleId(null);
@@ -160,7 +237,7 @@ export default function AdminEgress() {
 			}
 			setDialogOpen(false);
 			await fetchRules();
-		} catch (err) {
+		} catch {
 			toast.error(editingRuleId ? 'Failed to update rule' : 'Failed to create rule');
 		} finally {
 			setSaving(false);
@@ -175,17 +252,23 @@ export default function AdminEgress() {
 			toast.success('Egress rule deleted');
 			setDeletingRuleId(null);
 			await fetchRules();
-		} catch (err) {
+		} catch {
 			toast.error('Failed to delete rule');
 		} finally {
 			setDeleting(false);
 		}
 	}
 
-	if (loading) {
+	// Check if a host already has a rule
+	function hostHasRule(host: string): EgressRule | undefined {
+		return rules.find((r) => r.hostPattern === host);
+	}
+
+	if (modeLoading || rulesLoading) {
 		return (
 			<div className="space-y-6">
-				<h1 className="text-2xl font-bold">Egress Rules</h1>
+				<h1 className="text-2xl font-bold">Network Egress</h1>
+				<Skeleton className="h-24 w-full" />
 				<Skeleton className="h-64 w-full" />
 			</div>
 		);
@@ -193,21 +276,197 @@ export default function AdminEgress() {
 
 	return (
 		<div className="space-y-6">
-			<div className="flex items-center justify-between">
-				<h1 className="text-2xl font-bold">Egress Rules</h1>
-				<Button onClick={openCreateDialog}>
-					<Plus className="h-4 w-4 mr-1" /> Create Rule
-				</Button>
-			</div>
+			<h1 className="text-2xl font-bold">Network Egress</h1>
 
+			{/* Mode toggle card */}
 			<Card>
 				<CardHeader>
-					<CardTitle>Network Egress Rules</CardTitle>
+					<div className="flex items-center justify-between">
+						<div className="space-y-1">
+							<CardTitle className="flex items-center gap-2">
+								{mode === 'audit' ? (
+									<Eye className="h-5 w-5 text-amber-500" />
+								) : (
+									<ShieldCheck className="h-5 w-5 text-green-500" />
+								)}
+								Egress Mode: {mode === 'audit' ? 'Audit' : 'Enforce'}
+							</CardTitle>
+							<CardDescription>
+								{mode === 'audit'
+									? 'All outbound traffic is allowed and logged. Review the traffic log below, then create rules before switching to enforce mode.'
+									: 'Outbound traffic is restricted to system-required hosts and admin-configured rules. Blocked hosts return connection errors.'}
+							</CardDescription>
+						</div>
+						<div className="flex items-center gap-3">
+							<Label htmlFor="egress-mode" className="text-sm text-muted-foreground">
+								{mode === 'audit' ? 'Audit' : 'Enforce'}
+							</Label>
+							<Switch
+								id="egress-mode"
+								checked={mode === 'audit'}
+								onCheckedChange={handleModeToggle}
+								disabled={modeSwitching}
+							/>
+						</div>
+					</div>
+				</CardHeader>
+			</Card>
+
+			{/* Traffic log card (visible in both modes, most useful in audit) */}
+			<Card>
+				<CardHeader>
+					<div className="flex items-center justify-between">
+						<div className="space-y-1">
+							<CardTitle>Traffic Log</CardTitle>
+							<CardDescription>
+								Outbound requests captured from sandbox containers. Grouped by host, sorted by frequency.
+								{mode === 'enforce' && ' Enable audit mode to capture new traffic.'}
+							</CardDescription>
+						</div>
+						<div className="flex gap-2">
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={fetchLogs}
+								disabled={logsLoading}
+							>
+								<RefreshCw className={`h-4 w-4 mr-1 ${logsLoading ? 'animate-spin' : ''}`} />
+								Refresh
+							</Button>
+							{trafficEntries.length > 0 && (
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => setShowClearConfirm(true)}
+								>
+									<Eraser className="h-4 w-4 mr-1" />
+									Clear
+								</Button>
+							)}
+						</div>
+					</div>
+				</CardHeader>
+				<CardContent>
+					{trafficEntries.length === 0 ? (
+						<p className="text-muted-foreground py-8 text-center">
+							{mode === 'audit'
+								? 'No traffic captured yet. Sandbox containers will log outbound requests here.'
+								: 'No traffic logs available. Switch to audit mode to start capturing traffic.'}
+						</p>
+					) : (
+						<Table>
+							<TableHeader>
+								<TableRow>
+									<TableHead>Host</TableHead>
+									<TableHead className="text-right">Requests</TableHead>
+									<TableHead>Methods</TableHead>
+									<TableHead>Sample Paths</TableHead>
+									<TableHead>Last Seen</TableHead>
+									<TableHead>Status</TableHead>
+									<TableHead className="text-right">Actions</TableHead>
+								</TableRow>
+							</TableHeader>
+							<TableBody>
+								{trafficEntries.map((entry) => {
+									const existingRule = hostHasRule(entry.host);
+									return (
+										<TableRow key={entry.host}>
+											<TableCell className="font-mono text-sm">
+												{entry.host}
+											</TableCell>
+											<TableCell className="text-right font-medium">
+												{entry.requestCount.toLocaleString()}
+											</TableCell>
+											<TableCell>
+												<div className="flex gap-1 flex-wrap">
+													{entry.methods.map((m) => (
+														<Badge key={m} variant="outline" className="text-xs">
+															{m}
+														</Badge>
+													))}
+												</div>
+											</TableCell>
+											<TableCell className="max-w-48">
+												<div className="text-xs text-muted-foreground truncate">
+													{entry.samplePaths.join(', ')}
+												</div>
+											</TableCell>
+											<TableCell className="text-sm text-muted-foreground">
+												{new Date(entry.lastSeen).toLocaleTimeString()}
+											</TableCell>
+											<TableCell>
+												{existingRule ? (
+													<Badge
+														variant={existingRule.ruleType === 'allow' ? 'default' : 'destructive'}
+													>
+														{existingRule.ruleType}ed
+													</Badge>
+												) : (
+													<Badge variant="secondary">unmanaged</Badge>
+												)}
+											</TableCell>
+											<TableCell className="text-right">
+												{existingRule ? (
+													<Button
+														variant="ghost"
+														size="sm"
+														onClick={() => openEditDialog(existingRule)}
+													>
+														<Pencil className="h-3 w-3 mr-1" />
+														Edit
+													</Button>
+												) : (
+													<div className="flex justify-end gap-1">
+														<Button
+															variant="ghost"
+															size="sm"
+															onClick={() => createRuleFromTraffic(entry, 'allow')}
+															title="Create allow rule"
+														>
+															<ShieldPlus className="h-3 w-3 mr-1" />
+															Allow
+														</Button>
+														<Button
+															variant="ghost"
+															size="sm"
+															onClick={() => createRuleFromTraffic(entry, 'deny')}
+															className="text-destructive hover:text-destructive"
+															title="Create deny rule"
+														>
+															<ShieldCheck className="h-3 w-3 mr-1" />
+															Deny
+														</Button>
+													</div>
+												)}
+											</TableCell>
+										</TableRow>
+									);
+								})}
+							</TableBody>
+						</Table>
+					)}
+				</CardContent>
+			</Card>
+
+			{/* Rules card */}
+			<Card>
+				<CardHeader>
+					<div className="flex items-center justify-between">
+						<div className="space-y-1">
+							<CardTitle>Egress Rules</CardTitle>
+							<CardDescription>
+								Allow or deny specific hosts. Rules apply to all sandbox containers. Deny rules override allow rules.
+							</CardDescription>
+						</div>
+						<Button onClick={openCreateDialog} size="sm">
+							<Plus className="h-4 w-4 mr-1" /> Create Rule
+						</Button>
+					</div>
 				</CardHeader>
 				<CardContent>
 					{rules.length === 0 ? (
 						<p className="text-muted-foreground py-8 text-center">
-							No egress rules configured. Create one to get started.
+							No egress rules configured. Use the traffic log above to create rules from observed traffic, or create one manually.
 						</p>
 					) : (
 						<Table>
@@ -323,7 +582,6 @@ export default function AdminEgress() {
 								onValueChange={(v) => {
 									const scope = v as RuleScope;
 									updateField('scope', scope);
-									// Clear scope ID when switching to global
 									if (scope === 'global') {
 										updateField('scopeId', '');
 									}
@@ -346,11 +604,7 @@ export default function AdminEgress() {
 								<Input
 									value={form.scopeId}
 									onChange={(e) => updateField('scopeId', e.target.value)}
-									placeholder={
-										form.scope === 'tier'
-											? 'Tier ID'
-											: 'App ID'
-									}
+									placeholder={form.scope === 'tier' ? 'Tier ID' : 'App ID'}
 								/>
 							</div>
 						)}
@@ -360,7 +614,7 @@ export default function AdminEgress() {
 							<Input
 								value={form.hostPattern}
 								onChange={(e) => updateField('hostPattern', e.target.value)}
-								placeholder="e.g., *.google.com"
+								placeholder="e.g., *.google.com or api.example.com"
 							/>
 						</div>
 					</div>
@@ -376,7 +630,7 @@ export default function AdminEgress() {
 				</DialogContent>
 			</Dialog>
 
-			{/* Delete confirmation */}
+			{/* Delete rule confirmation */}
 			<AlertDialog
 				open={!!deletingRuleId}
 				onOpenChange={(open) => { if (!open) setDeletingRuleId(null); }}
@@ -385,13 +639,34 @@ export default function AdminEgress() {
 					<AlertDialogHeader>
 						<AlertDialogTitle>Delete Egress Rule</AlertDialogTitle>
 						<AlertDialogDescription>
-							This will permanently delete this egress rule. Network access controlled by this rule will no longer be enforced. This action cannot be undone.
+							This will permanently delete this egress rule. Network access controlled by this rule will no longer be enforced.
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>
 						<AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
 						<AlertDialogAction onClick={handleDelete} disabled={deleting}>
 							{deleting ? 'Deleting...' : 'Delete'}
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
+
+			{/* Clear logs confirmation */}
+			<AlertDialog
+				open={showClearConfirm}
+				onOpenChange={(open) => { if (!open) setShowClearConfirm(false); }}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>Clear Traffic Logs</AlertDialogTitle>
+						<AlertDialogDescription>
+							This will delete all captured traffic log entries. This is useful after creating rules from observed traffic. Logs are also auto-cleaned after 24 hours.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel disabled={clearingLogs}>Cancel</AlertDialogCancel>
+						<AlertDialogAction onClick={handleClearLogs} disabled={clearingLogs}>
+							{clearingLogs ? 'Clearing...' : 'Clear All Logs'}
 						</AlertDialogAction>
 					</AlertDialogFooter>
 				</AlertDialogContent>
