@@ -10,7 +10,7 @@
  * for the outbound interception to work.
  */
 
-import { Sandbox } from '@cloudflare/sandbox';
+import { Sandbox, ContainerProxy } from '@cloudflare/sandbox';
 import { createLogger } from '../../logger';
 import { IntegrationService } from '../../database/services/IntegrationService';
 import {
@@ -18,6 +18,10 @@ import {
 	refreshDriveAccessToken,
 	encryptDriveTokens,
 } from '../integrations/GoogleDriveOAuth';
+
+// ContainerProxy must be re-exported from the Worker entrypoint
+// for outbound request interception to work.
+export { ContainerProxy };
 
 const logger = createLogger('UserAppSandbox');
 
@@ -77,51 +81,52 @@ export class UserAppSandboxService extends Sandbox {
 	// Default to enforce mode. Audit mode is set at runtime.
 	enableInternet = false;
 	allowedHosts = SYSTEM_REQUIRED_HOSTS;
-
-	/**
-	 * Outbound handler: logs all outbound HTTP/HTTPS traffic for audit mode.
-	 * In audit mode, all traffic is allowed but logged to KV for admin review.
-	 * In enforce mode, this handler is only invoked for allowed hosts.
-	 */
-	static override outbound = async (
-		request: Request,
-		env: unknown,
-		ctx: { containerId: string }
-	): Promise<Response> => {
-		const url = new URL(request.url);
-		const envTyped = env as { VibecoderStore: KVNamespace };
-
-		// Log the outbound request to KV for admin audit
-		try {
-			const logEntry = {
-				host: url.hostname,
-				method: request.method,
-				path: url.pathname,
-				containerId: ctx.containerId,
-				timestamp: new Date().toISOString(),
-			};
-
-			// Append to a rolling log list in KV (fire-and-forget)
-			const logKey = `egress_log:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
-			envTyped.VibecoderStore.put(logKey, JSON.stringify(logEntry), {
-				expirationTtl: 86400,
-			}).catch(() => {});
-
-			// Also maintain a host frequency counter for the admin dashboard
-			const counterKey = `egress_host:${url.hostname}`;
-			const current = await envTyped.VibecoderStore.get(counterKey);
-			const count = current ? parseInt(current, 10) + 1 : 1;
-			envTyped.VibecoderStore.put(counterKey, String(count), {
-				expirationTtl: 86400,
-			}).catch(() => {});
-		} catch {
-			// Logging failure should never block traffic
-		}
-
-		// Forward the request
-		return fetch(request);
-	};
 }
+
+/**
+ * Outbound handler: logs all outbound HTTP/HTTPS traffic.
+ * In audit mode (enableInternet=true), captures ALL traffic for admin review.
+ * In enforce mode (enableInternet=false), captures only allowed-host traffic.
+ * Must be assigned outside the class body per Sandbox SDK convention.
+ */
+UserAppSandboxService.outbound = async function outboundLogger(
+	request: Request,
+	env: unknown,
+	ctx: { containerId: string }
+): Promise<Response> {
+	const url = new URL(request.url);
+	const envTyped = env as { VibecoderStore: KVNamespace };
+
+	// Log the outbound request to KV for admin audit
+	try {
+		const logEntry = {
+			host: url.hostname,
+			method: request.method,
+			path: url.pathname,
+			containerId: ctx.containerId,
+			timestamp: new Date().toISOString(),
+		};
+
+		// Append to a rolling log list in KV (fire-and-forget)
+		const logKey = `egress_log:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+		envTyped.VibecoderStore.put(logKey, JSON.stringify(logEntry), {
+			expirationTtl: 86400,
+		}).catch(() => {});
+
+		// Also maintain a host frequency counter for the admin dashboard
+		const counterKey = `egress_host:${url.hostname}`;
+		const current = await envTyped.VibecoderStore.get(counterKey);
+		const count = current ? parseInt(current, 10) + 1 : 1;
+		envTyped.VibecoderStore.put(counterKey, String(count), {
+			expirationTtl: 86400,
+		}).catch(() => {});
+	} catch {
+		// Logging failure should never block traffic
+	}
+
+	// Forward the request to the internet
+	return fetch(request);
+};
 
 /**
  * Outbound handler for drive.api virtual host.
@@ -210,5 +215,13 @@ async function driveProxyHandler(
 	return fetch(proxyRequest);
 }
 
-/** Export the drive proxy for use as an outbound handler name. */
+/**
+ * Named outbound handlers for runtime assignment via setOutboundByHost().
+ * The 'driveProxy' handler is assigned to 'drive.api' at sandbox creation
+ * when the user has Google Drive connected.
+ */
+UserAppSandboxService.outboundHandlers = {
+	driveProxy: driveProxyHandler,
+};
+
 export { driveProxyHandler };
