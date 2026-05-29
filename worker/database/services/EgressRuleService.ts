@@ -19,6 +19,19 @@ export type EgressMode = 'audit' | 'enforce';
 
 const EGRESS_MODE_SETTING_KEY = 'egress_mode';
 
+/** Minimal KV interface for static methods that only need KV access. */
+interface KVStore {
+	get(key: string): Promise<string | null>;
+	put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
+	delete(key: string): Promise<void>;
+	list(options: { prefix: string }): Promise<{ keys: { name: string }[] }>;
+}
+
+/** Env subset needed by static log methods. */
+interface EnvWithKV {
+	VibecoderStore: KVStore;
+}
+
 /** Resolved egress policy for a specific context (user + app) */
 export interface EgressPolicy {
 	allowedHosts: string[];
@@ -212,6 +225,7 @@ export class EgressRuleService extends BaseService {
 				.where(eq(schema.systemSettings.key, EGRESS_MODE_SETTING_KEY));
 		} else {
 			await this.database.insert(schema.systemSettings).values({
+				id: EGRESS_MODE_SETTING_KEY,
 				key: EGRESS_MODE_SETTING_KEY,
 				value: mode,
 				updatedAt: new Date(),
@@ -228,7 +242,7 @@ export class EgressRuleService extends BaseService {
 	 * Groups by host with request count and last seen timestamp.
 	 * Returns hosts sorted by count (most traffic first).
 	 */
-	static async getTrafficLogs(env: Env): Promise<EgressTrafficEntry[]> {
+	static async getTrafficLogs(env: EnvWithKV): Promise<EgressTrafficEntry[]> {
 		// List all egress_log: keys from KV
 		const logKeys = await env.VibecoderStore.list({ prefix: 'egress_log:' });
 		const hostMap = new Map<string, { count: number; lastSeen: string; methods: Set<string>; paths: Set<string> }>();
@@ -286,7 +300,7 @@ export class EgressRuleService extends BaseService {
 	}
 
 	/** Clear all egress logs from KV. */
-	static async clearTrafficLogs(env: Env): Promise<number> {
+	static async clearTrafficLogs(env: EnvWithKV): Promise<number> {
 		const logKeys = await env.VibecoderStore.list({ prefix: 'egress_log:' });
 		const hostKeys = await env.VibecoderStore.list({ prefix: 'egress_host:' });
 

@@ -77,144 +77,138 @@ export class UserAppSandboxService extends Sandbox {
 	// Default to enforce mode. Audit mode is set at runtime.
 	enableInternet = false;
 	allowedHosts = SYSTEM_REQUIRED_HOSTS;
+
+	/**
+	 * Outbound handler: logs all outbound HTTP/HTTPS traffic for audit mode.
+	 * In audit mode, all traffic is allowed but logged to KV for admin review.
+	 * In enforce mode, this handler is only invoked for allowed hosts.
+	 */
+	static override outbound = async (
+		request: Request,
+		env: unknown,
+		ctx: { containerId: string }
+	): Promise<Response> => {
+		const url = new URL(request.url);
+		const envTyped = env as { VibecoderStore: KVNamespace };
+
+		// Log the outbound request to KV for admin audit
+		try {
+			const logEntry = {
+				host: url.hostname,
+				method: request.method,
+				path: url.pathname,
+				containerId: ctx.containerId,
+				timestamp: new Date().toISOString(),
+			};
+
+			// Append to a rolling log list in KV (fire-and-forget)
+			const logKey = `egress_log:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+			envTyped.VibecoderStore.put(logKey, JSON.stringify(logEntry), {
+				expirationTtl: 86400,
+			}).catch(() => {});
+
+			// Also maintain a host frequency counter for the admin dashboard
+			const counterKey = `egress_host:${url.hostname}`;
+			const current = await envTyped.VibecoderStore.get(counterKey);
+			const count = current ? parseInt(current, 10) + 1 : 1;
+			envTyped.VibecoderStore.put(counterKey, String(count), {
+				expirationTtl: 86400,
+			}).catch(() => {});
+		} catch {
+			// Logging failure should never block traffic
+		}
+
+		// Forward the request
+		return fetch(request);
+	};
 }
 
 /**
- * Outbound handler: logs all outbound HTTP/HTTPS traffic for audit mode.
- * In audit mode, all traffic is allowed but logged to KV for admin review.
- * In enforce mode, this handler is only invoked for allowed hosts.
- */
-UserAppSandboxService.outbound = async (
-	request: Request,
-	env: unknown,
-	ctx: { containerId: string }
-) => {
-	const url = new URL(request.url);
-	const envTyped = env as Env;
-
-	// Log the outbound request to KV for admin audit
-	try {
-		const logEntry = {
-			host: url.hostname,
-			method: request.method,
-			path: url.pathname,
-			containerId: ctx.containerId,
-			timestamp: new Date().toISOString(),
-		};
-
-		// Append to a rolling log list in KV (fire-and-forget)
-		const logKey = `egress_log:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
-		envTyped.VibecoderStore.put(logKey, JSON.stringify(logEntry), {
-			expirationTtl: 86400, // 24h TTL
-		}).catch(() => {});
-
-		// Also maintain a host frequency counter for the admin dashboard
-		const counterKey = `egress_host:${url.hostname}`;
-		const current = await envTyped.VibecoderStore.get(counterKey);
-		const count = current ? parseInt(current, 10) + 1 : 1;
-		envTyped.VibecoderStore.put(counterKey, String(count), {
-			expirationTtl: 86400,
-		}).catch(() => {});
-	} catch {
-		// Logging failure should never block traffic
-	}
-
-	// Forward the request
-	return fetch(request);
-} as unknown as typeof Sandbox.outbound;
-
-/**
- * Named outbound handlers for runtime assignment via setOutboundByHost().
- *
- * `driveProxy`: Intercepts requests to `drive.api`, looks up the user's
- * Google Drive OAuth token from D1, injects it as an Authorization header,
- * and forwards the request to the real Google APIs endpoint.
+ * Outbound handler for drive.api virtual host.
+ * Intercepts requests to `drive.api`, looks up the user's Google Drive
+ * OAuth token from D1, injects it as an Authorization header, and
+ * forwards the request to the real Google APIs endpoint.
  *
  * The user's token is never exposed to the sandbox -- the generated app
  * simply calls `http://drive.api/drive/v3/files` and this handler adds auth.
  */
-UserAppSandboxService.outboundHandlers = {
-	driveProxy: async (
-		request: Request,
-		env: Env,
-		ctx: { containerId: string }
-	) => {
-		const url = new URL(request.url);
-		logger.info('Drive API proxy request', {
-			containerId: ctx.containerId,
-			path: url.pathname,
-			method: request.method,
+async function driveProxyHandler(
+	request: Request,
+	env: Env,
+	ctx: { containerId: string }
+): Promise<Response> {
+	const url = new URL(request.url);
+	logger.info('Drive API proxy request', {
+		containerId: ctx.containerId,
+		path: url.pathname,
+		method: request.method,
+	});
+
+	const userId = await env.VibecoderStore.get(`sandbox_user:${ctx.containerId}`);
+	if (!userId) {
+		logger.warn('No user mapping for container', { containerId: ctx.containerId });
+		return new Response(JSON.stringify({ error: 'Drive integration not configured' }), {
+			status: 403,
+			headers: { 'Content-Type': 'application/json' },
 		});
+	}
 
-		// Look up the user's Drive token from KV.
-		// The containerId maps to a sandbox session which maps to a user.
-		// We store the mapping at sandbox creation time in KV.
-		const userId = await env.VibecoderStore.get(`sandbox_user:${ctx.containerId}`);
-		if (!userId) {
-			logger.warn('No user mapping for container', { containerId: ctx.containerId });
-			return new Response(JSON.stringify({ error: 'Drive integration not configured' }), {
-				status: 403,
-				headers: { 'Content-Type': 'application/json' },
-			});
-		}
+	const integrationService = new IntegrationService(env);
+	const integration = await integrationService.getIntegration(userId, 'google_drive');
 
-		// Get the user's Drive access token
-		const integrationService = new IntegrationService(env);
-		const integration = await integrationService.getIntegration(userId, 'google_drive');
+	if (!integration?.isActive || !integration.accessTokenEncrypted) {
+		return new Response(JSON.stringify({ error: 'Google Drive not connected' }), {
+			status: 403,
+			headers: { 'Content-Type': 'application/json' },
+		});
+	}
 
-		if (!integration?.isActive || !integration.accessTokenEncrypted) {
-			return new Response(JSON.stringify({ error: 'Google Drive not connected' }), {
-				status: 403,
-				headers: { 'Content-Type': 'application/json' },
-			});
-		}
+	let accessToken = await decryptDriveToken(env, integration.accessTokenEncrypted);
+	if (!accessToken) {
+		return new Response(JSON.stringify({ error: 'Failed to decrypt Drive token' }), {
+			status: 500,
+			headers: { 'Content-Type': 'application/json' },
+		});
+	}
 
-		let accessToken = await decryptDriveToken(env, integration.accessTokenEncrypted);
-		if (!accessToken) {
-			return new Response(JSON.stringify({ error: 'Failed to decrypt Drive token' }), {
-				status: 500,
-				headers: { 'Content-Type': 'application/json' },
-			});
-		}
+	// Refresh if expired
+	const isExpired = integration.tokenExpiresAt &&
+		new Date(integration.tokenExpiresAt).getTime() < Date.now() + 60000;
 
-		// Refresh if expired
-		const isExpired = integration.tokenExpiresAt &&
-			new Date(integration.tokenExpiresAt).getTime() < Date.now() + 60000;
-
-		if (isExpired && integration.refreshTokenEncrypted) {
-			const refreshToken = await decryptDriveToken(env, integration.refreshTokenEncrypted);
-			if (refreshToken) {
-				try {
-					const refreshed = await refreshDriveAccessToken(env, refreshToken);
-					accessToken = refreshed.accessToken;
-					// Update stored token (fire-and-forget)
-					encryptDriveTokens(env, refreshed.accessToken).then(({ accessEncrypted }) => {
-						integrationService.upsertIntegration({
-							userId,
-							provider: 'google_drive',
-							accessTokenEncrypted: accessEncrypted,
-							tokenExpiresAt: new Date(Date.now() + refreshed.expiresIn * 1000),
-							scopes: (integration.scopes as string[]) ?? [],
-						});
-					}).catch((err) => logger.error('Failed to update refreshed Drive token', err));
-				} catch (err) {
-					logger.error('Drive token refresh failed', err);
-				}
+	if (isExpired && integration.refreshTokenEncrypted) {
+		const refreshToken = await decryptDriveToken(env, integration.refreshTokenEncrypted);
+		if (refreshToken) {
+			try {
+				const refreshed = await refreshDriveAccessToken(env, refreshToken);
+				accessToken = refreshed.accessToken;
+				encryptDriveTokens(env, refreshed.accessToken).then(({ accessEncrypted }) => {
+					integrationService.upsertIntegration({
+						userId,
+						provider: 'google_drive',
+						accessTokenEncrypted: accessEncrypted,
+						tokenExpiresAt: new Date(Date.now() + refreshed.expiresIn * 1000),
+						scopes: (integration.scopes as string[]) ?? [],
+					});
+				}).catch((err: unknown) => logger.error('Failed to update refreshed Drive token', err));
+			} catch (err) {
+				logger.error('Drive token refresh failed', err);
 			}
 		}
+	}
 
-		// Build the real Google API request
-		const googleUrl = `https://www.googleapis.com${url.pathname}${url.search}`;
-		const proxyHeaders = new Headers(request.headers);
-		proxyHeaders.set('Authorization', `Bearer ${accessToken}`);
-		proxyHeaders.delete('Host');
+	const googleUrl = `https://www.googleapis.com${url.pathname}${url.search}`;
+	const proxyHeaders = new Headers(request.headers);
+	proxyHeaders.set('Authorization', `Bearer ${accessToken}`);
+	proxyHeaders.delete('Host');
 
-		const proxyRequest = new Request(googleUrl, {
-			method: request.method,
-			headers: proxyHeaders,
-			body: request.body,
-		});
+	const proxyRequest = new Request(googleUrl, {
+		method: request.method,
+		headers: proxyHeaders,
+		body: request.body,
+	});
 
-		return fetch(proxyRequest);
-	},
-};
+	return fetch(proxyRequest);
+}
+
+/** Export the drive proxy for use as an outbound handler name. */
+export { driveProxyHandler };
